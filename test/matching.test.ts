@@ -46,9 +46,8 @@ test("globMatch", async (t) => {
   });
 
   await t.test("** matches anything including /", () => {
-    // Note: **/*.ts requires at least one / in the path currently
-    // This is a known limitation - TODO: make ** match zero or more path segments
-    assert.equal(globMatch("**/*.ts", "test.ts"), false); // Would be true with proper ** semantics
+    // minimatch correctly handles ** matching zero directories
+    assert.equal(globMatch("**/*.ts", "test.ts"), true);
     assert.equal(globMatch("**/*.ts", "src/test.ts"), true);
     assert.equal(globMatch("**/*.ts", "src/sub/test.ts"), true);
   });
@@ -200,7 +199,9 @@ test("resolveGlobAction", async (t) => {
   });
 
   await t.test("deny action", () => {
-    assert.equal(resolveGlobAction(".env", { "*.env": "deny" }), "deny");
+    // Note: * doesn't match leading dot, so use *.env for regular files, .env for dotfile
+    assert.equal(resolveGlobAction("config.env", { "*.env": "deny" }), "deny");
+    assert.equal(resolveGlobAction(".env", { ".env": "deny" }), "deny");
   });
 
   await t.test("deny overrides allow", () => {

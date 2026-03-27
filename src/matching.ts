@@ -1,3 +1,4 @@
+import { minimatch } from "minimatch";
 import type { Action } from "./types.ts";
 
 /**
@@ -14,7 +15,7 @@ export function isSubsequence(needle: string[], haystack: string[]): boolean {
 }
 
 /**
- * Match a glob pattern against a string.
+ * Match a glob pattern against a string using minimatch.
  * - `*` matches anything except `/`
  * - `**` matches anything including `/`
  * - `?` matches single character
@@ -31,48 +32,7 @@ export function globMatch(pattern: string, input: string): boolean {
     input = home + input.slice(1);
   }
 
-  // Convert glob pattern to regex
-  let regex = "^";
-  let i = 0;
-  while (i < pattern.length) {
-    const char = pattern[i]!;
-    if (char === "*" && pattern[i + 1] === "*") {
-      // ** matches anything including /
-      regex += ".*";
-      i += 2;
-    } else if (char === "*") {
-      // * matches anything except /
-      regex += "[^/]*";
-      i++;
-    } else if (char === "?") {
-      // ? matches single character
-      regex += ".";
-      i++;
-    } else if (char === "[" ) {
-      // Character class
-      let j = i + 1;
-      while (j < pattern.length && pattern[j] !== "]") {
-        j++;
-      }
-      regex += pattern.slice(i, j + 1);
-      i = j + 1;
-    } else {
-      // Escape regex special characters
-      if (/[.^$+{}()|\\]/.test(char)) {
-        regex += "\\" + char;
-      } else {
-        regex += char;
-      }
-      i++;
-    }
-  }
-  regex += "$";
-
-  try {
-    return new RegExp(regex).test(input);
-  } catch {
-    return false;
-  }
+  return minimatch(input, pattern);
 }
 
 /**
