@@ -52,12 +52,23 @@ export default function (pi: ExtensionAPI) {
       } else if (action === "list") {
         const enabled = config.enabled ? "ENABLED" : "DISABLED";
 
+        // Build effective rules (user + defaults + project + session + env)
+        const projectResult = loadProjectConfig(ctx.cwd);
+        const projectRules = projectResult?.config.rules ?? {};
+        const envRules = process.env.PI_GUARD ? JSON.parse(process.env.PI_GUARD) : undefined;
+        const effectiveRules = buildEffectiveRules(
+          config.rules,
+          projectRules,
+          sessionRules,
+          envRules,
+        );
+
         let output = `pi-guard: ${enabled}\n\n`;
 
-        if (typeof config.rules === "string") {
-          output += `Global rule: ${config.rules}\n`;
+        if (typeof effectiveRules === "string") {
+          output += `Global rule: ${effectiveRules}\n`;
         } else {
-          for (const [tool, rules] of Object.entries(config.rules)) {
+          for (const [tool, rules] of Object.entries(effectiveRules)) {
             output += `${tool}:\n`;
             if (typeof rules === "string") {
               output += `  ${rules}\n`;
@@ -67,16 +78,6 @@ export default function (pi: ExtensionAPI) {
               }
             }
             output += "\n";
-          }
-        }
-
-        if (Object.keys(sessionRules).length > 0) {
-          output += "Session rules:\n";
-          for (const [tool, rules] of Object.entries(sessionRules)) {
-            output += `  ${tool}:\n`;
-            for (const [pattern, action] of Object.entries(rules)) {
-              output += `    ${pattern}: ${action}\n`;
-            }
           }
         }
 
