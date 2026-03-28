@@ -7,6 +7,9 @@ export const DEFAULT_CONFIG: GuardConfig = {
     read: { param: "path", type: "glob" },
     write: { param: "path", type: "glob" },
     edit: { param: "path", type: "glob" },
+    grep: { param: "path", type: "glob" },
+    find: { param: "path", type: "glob" },
+    ls: { param: "path", type: "glob" },
   },
   rules: {
     bash: {
@@ -37,6 +40,15 @@ export const DEFAULT_CONFIG: GuardConfig = {
     },
     edit: {
       "*": "ask",
+    },
+    grep: {
+      "*": "allow",
+    },
+    find: {
+      "*": "allow",
+    },
+    ls: {
+      "*": "allow",
     },
   },
 };
