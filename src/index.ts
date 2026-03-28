@@ -179,7 +179,7 @@ export default function (pi: ExtensionAPI) {
       if (action === "deny") {
         return {
           block: true,
-          reason: `[Blocked: ${tool}]\nNo matching allow rule and non-interactive mode.\nDo not retry.`,
+          reason: `[Blocked by pi-guard: Security policy]`,
         };
       }
       // "ask" - fall through to interactive handling
@@ -193,7 +193,7 @@ export default function (pi: ExtensionAPI) {
       if (!ctx.hasUI) {
         return {
           block: true,
-          reason: `[Blocked: ${tool}]\nNo matching allow rule and no interactive session available.\nDo not retry.`,
+          reason: `[Blocked by pi-guard: No interactive session available]`,
         };
       }
       // Interactive mode - prompt for approval
@@ -207,14 +207,14 @@ export default function (pi: ExtensionAPI) {
       if (action === "deny") {
         return {
           block: true,
-          reason: `[Blocked by rule: ${tool} → deny]\nThis operation is blocked by security policy. Do not retry.`,
+          reason: `[Blocked by pi-guard: Security policy]`,
         };
       }
       // "ask" - prompt for approval
       if (!ctx.hasUI) {
         return {
           block: true,
-          reason: `[Blocked: ${tool}]\nNo matching allow rule and no interactive session available.\nDo not retry.`,
+          reason: `[Blocked by pi-guard: No interactive session available]`,
         };
       }
       return handleInteractiveApproval(pi, tool, input, ctx, sessionRules);
@@ -232,13 +232,13 @@ export default function (pi: ExtensionAPI) {
       if (defaultAction === "deny") {
         return {
           block: true,
-          reason: `[Blocked by rule: ${tool} * → deny]\nThis operation is blocked by security policy. Do not retry.`,
+          reason: `[Blocked by pi-guard: Security policy]`,
         };
       }
       if (!ctx.hasUI) {
         return {
           block: true,
-          reason: `[Blocked: ${tool}]\nNo matching allow rule and no interactive session available.\nDo not retry.`,
+          reason: `[Blocked by pi-guard: No interactive session available]`,
         };
       }
       return handleInteractiveApproval(pi, tool, input, ctx, sessionRules);
@@ -287,7 +287,7 @@ async function handleInteractiveApproval(
   }
 
   if (choice !== "Allow") {
-    return { block: true, reason: `[Denied: ${value}]\nUser rejected this invocation. You may propose alternatives or wait for further instructions.` };
+    return { block: true, reason: `[Blocked by pi-guard: User rejected this invocation]` };
   }
 }
 
@@ -304,7 +304,7 @@ async function handleBashTool(
     ast = parseBash(rawCmd);
   } catch {
     if (!ctx.hasUI) {
-      return { block: true, reason: "Failed to parse bash AST. Command rejected for safety." };
+      return { block: true, reason: `[Blocked by pi-guard: Failed to parse command safely]` };
     }
 
     pi.events.emit("nudge", { body: "Command needs approval" });
@@ -314,7 +314,7 @@ async function handleBashTool(
     );
 
     if (!confirmed) {
-      return { block: true, reason: "User denied unparseable command." };
+      return { block: true, reason: `[Blocked by pi-guard: User rejected this invocation]` };
     }
 
     return;
@@ -350,16 +350,15 @@ async function handleBashTool(
     const action = resolveBashAction(name, args, mergedRules);
 
     if (action === "deny") {
-      const matchedRule = findMatchingRule(name, args, toolRules, "deny");
       return {
         block: true,
-        reason: `[Blocked by rule: "${matchedRule}" → deny]\nThis operation is blocked by security policy. Do not retry.`,
+        reason: `[Blocked by pi-guard: Security policy]`,
       };
     }
 
     return {
       block: true,
-      reason: `[Blocked: ${formatCommand(firstCmd)}]\nNo matching allow rule and no interactive session available.\nDo not retry.`,
+      reason: `[Blocked by pi-guard: No interactive session available]`,
     };
   }
 
@@ -382,7 +381,7 @@ async function handleBashTool(
   }
 
   if (choice !== "Allow") {
-    return { block: true, reason: `[Denied: ${unauthorizedCommands.map(c => formatCommand(c)).join(", ")}]\nUser rejected this invocation. You may propose alternatives or wait for further instructions.` };
+    return { block: true, reason: `[Blocked by pi-guard: User rejected this invocation]` };
   }
 }
 
@@ -423,17 +422,16 @@ async function handleGlobTool(
   if (action === "allow") return;
 
   if (action === "deny") {
-    const matchedRule = findGlobMatchingRule(path, toolRules, "deny");
     return {
       block: true,
-      reason: `[Blocked by rule: "${matchedRule}" → deny]\nThis operation is blocked by security policy. Do not retry.`,
+      reason: `[Blocked by pi-guard: Security policy]`,
     };
   }
 
   if (!ctx.hasUI) {
     return {
       block: true,
-      reason: `[Blocked: ${path}]\nNo matching allow rule and no interactive session available.\nDo not retry.`,
+      reason: `[Blocked by pi-guard: No interactive session available]`,
     };
   }
 
@@ -450,7 +448,7 @@ async function handleGlobTool(
   }
 
   if (choice !== "Allow") {
-    return { block: true, reason: `[Denied: ${path}]\nUser rejected this invocation. You may propose alternatives or wait for further instructions.` };
+    return { block: true, reason: `[Blocked by pi-guard: User rejected this invocation]` };
   }
 }
 
@@ -484,14 +482,14 @@ async function handleExactTool(
   if (action === "deny") {
     return {
       block: true,
-      reason: `[Blocked by rule: "${value}" → deny]\nThis operation is blocked by security policy. Do not retry.`,
+      reason: `[Blocked by pi-guard: Security policy]`,
     };
   }
 
   if (!ctx.hasUI) {
     return {
       block: true,
-      reason: `[Blocked: ${value}]\nNo matching allow rule and no interactive session available.\nDo not retry.`,
+      reason: `[Blocked by pi-guard: No interactive session available]`,
     };
   }
 
@@ -508,6 +506,6 @@ async function handleExactTool(
   }
 
   if (choice !== "Allow") {
-    return { block: true, reason: `[Denied: ${value}]\nUser rejected this invocation. You may propose alternatives or wait for further instructions.` };
+    return { block: true, reason: `[Blocked by pi-guard: User rejected this invocation]` };
   }
 }
