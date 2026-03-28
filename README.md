@@ -152,37 +152,8 @@ Each permission rule resolves to one of:
 Manage pi-guard security settings.
 
 ```
-/guard allow bash git *    # Allow all git commands
-/guard deny bash rm *       # Deny all rm commands
-/guard toggle               # Enable/disable guard
-/guard list                 # Show current rules
-```
-
-## Feedback Context
-
-When the permission system blocks or allows a tool call, it injects context into the tool result:
-
-**On approval (interactive):**
-```
-[Approved: "git diff main...feature"]
-```
-
-**On approval (non-interactive - rule matched):**
-```
-[Allowed by rule: "git *" → allow]
-```
-
-**On denial (interactive - user rejected):**
-```
-[Denied: "rm -rf node_modules"]
-User rejected this invocation. You may propose alternatives or wait for further instructions.
-```
-
-**On denial (non-interactive - rule matched):**
-```
-[Blocked by rule: "rm -rf node_modules"]
-Rule matched: "rm *" → deny
-This operation is blocked by security policy. Do not retry.
+/guard toggle    # Enable/disable guard
+/guard list      # Show current rules
 ```
 
 ## Default Rules

@@ -10,7 +10,7 @@ import {
   loadProjectConfig,
   buildEffectiveRules,
 } from "./config.ts";
-import { resolveBashAction, resolveGlobAction, resolveExactAction, globMatch } from "./matching.ts";
+import { resolveBashAction, resolveGlobAction, resolveExactAction } from "./matching.ts";
 import type { Action, ToolRules, CommandRef, ToolCallInput } from "./types.ts";
 
 export function parseGuardArgs(args: string): { action: string; target: string } {
@@ -45,65 +45,7 @@ export default function (pi: ExtensionAPI) {
 
       const { action, target } = parseGuardArgs(args);
 
-      if (action === "allow" && target) {
-        // Parse "tool pattern" format: "bash git *" -> tool: bash, pattern: "git *"
-        const parts = target.split(/\s+/);
-        const tool = parts[0];
-        const pattern = parts.slice(1).join(" ");
-
-        if (!tool) {
-          ctx.ui.notify("Usage: /guard allow <tool> <pattern>", "warning");
-          return;
-        }
-
-        const rules = config.rules;
-        if (typeof rules === "string") {
-          ctx.ui.notify("Cannot add rules when global rule is set", "warning");
-          return;
-        }
-
-        const toolRules = rules[tool];
-        if (typeof toolRules === "string") {
-          // Replace whole-tool action with pattern-based rules
-          (rules as Record<string, ToolRules>)[tool] = { "*": toolRules, [pattern || "*"]: "allow" };
-        } else {
-          (rules as Record<string, ToolRules>)[tool] = { ...toolRules as Record<string, Action>, [pattern || "*"]: "allow" };
-        }
-
-        // Merge session rules
-        if (sessionRules[tool]) {
-          (rules as Record<string, ToolRules>)[tool] = {
-            ...(rules[tool] as Record<string, Action>),
-            ...sessionRules[tool],
-          };
-        }
-
-        ctx.ui.notify(`'${pattern || "*"}' added to allowed ${tool} patterns.`, "info");
-      } else if (action === "deny" && target) {
-        const parts = target.split(/\s+/);
-        const tool = parts[0];
-        const pattern = parts.slice(1).join(" ");
-
-        if (!tool) {
-          ctx.ui.notify("Usage: /guard deny <tool> <pattern>", "warning");
-          return;
-        }
-
-        const rules = config.rules;
-        if (typeof rules === "string") {
-          ctx.ui.notify("Cannot add rules when global rule is set", "warning");
-          return;
-        }
-
-        const toolRules = rules[tool];
-        if (typeof toolRules === "string") {
-          (rules as Record<string, ToolRules>)[tool] = { "*": toolRules, [pattern || "*"]: "deny" };
-        } else {
-          (rules as Record<string, ToolRules>)[tool] = { ...toolRules as Record<string, Action>, [pattern || "*"]: "deny" };
-        }
-
-        ctx.ui.notify(`'${pattern || "*"}' added to denied ${tool} patterns.`, "info");
-      } else if (action === "toggle") {
+      if (action === "toggle") {
         config.enabled = !config.enabled;
         saveConfig(config);
         ctx.ui.notify(`pi-guard is now ${config.enabled ? "ENABLED" : "DISABLED"}`, "info");
@@ -140,7 +82,7 @@ export default function (pi: ExtensionAPI) {
 
         ctx.ui.notify(output, "info");
       } else {
-        ctx.ui.notify("Usage: /guard <allow|deny|toggle|list> [tool] [pattern]", "warning");
+        ctx.ui.notify("Usage: /guard <toggle|list>", "warning");
       }
     },
   });
@@ -385,24 +327,6 @@ async function handleBashTool(
   }
 }
 
-function findMatchingRule(name: string, args: string[], rules: Record<string, Action>, targetAction: Action): string {
-  for (const [pattern, action] of Object.entries(rules)) {
-    if (action !== targetAction) continue;
-    if (pattern === "*") return pattern;
-    if (pattern === name) return pattern;
-    const tokens = pattern.split(" ");
-    if (tokens[0] === name && tokens.length <= args.length + 1) {
-      // Check subsequence match
-      let ti = 1;
-      for (const arg of args) {
-        if (ti < tokens.length && arg === tokens[ti]) ti++;
-      }
-      if (ti === tokens.length) return pattern;
-    }
-  }
-  return name;
-}
-
 async function handleGlobTool(
   pi: ExtensionAPI,
   tool: string,
@@ -450,15 +374,6 @@ async function handleGlobTool(
   if (choice !== "Allow") {
     return { block: true, reason: `[Blocked by pi-guard: User rejected this invocation]` };
   }
-}
-
-function findGlobMatchingRule(path: string, rules: Record<string, Action>, targetAction: Action): string {
-  for (const [pattern, action] of Object.entries(rules)) {
-    if (action !== targetAction) continue;
-    if (pattern === "*") return pattern;
-    if (globMatch(pattern, path)) return pattern;
-  }
-  return path;
 }
 
 async function handleExactTool(
