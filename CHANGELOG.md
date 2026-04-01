@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2026-04-01
+
+### Added
+
+- Safe bash commands — whitelisted commands that bypass permission checks (`echo`, `printf`, `true`, `false`, `pwd`, `cd`, etc.)
+- `gh` CLI support — built-in matcher for GitHub CLI commands with subsequence matching
+- `find -exec` rule — requires explicit approval for `find -exec` commands
+- Matchers and rules for optional tools `grep`, `find`, and `ls`
+- GitHub Actions workflow for trusted npm publishing via OIDC
+
+### Fixed
+
+- `/guard list` now shows effective rules (previously showed only base config)
+
+### Changed
+
+- Consolidated default configuration into `defaults.ts` for single source of truth
+- Simplified README
+
 ## [1.0.0] - 2026-03-28
 
 ### Added
