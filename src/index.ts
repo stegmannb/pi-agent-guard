@@ -15,22 +15,32 @@ import {
   handleGlobTool,
   handleExactTool,
 } from "./handlers.ts";
-import type { Action, ToolCallInput } from "./types.ts";
+import type { Action, Rules, ToolCallInput } from "./types.ts";
 
 export { parseGuardArgs };
 
 export default function (pi: ExtensionAPI) {
+  // Load all static config once at startup
   const loaded = loadConfig();
+  const projectResult = loadProjectConfig(process.cwd());
+
+  const userRules: Rules = loaded.config.rules;
+  const projectRules: Rules = projectResult?.config.rules ?? {};
+  const envRules: Rules | undefined = loaded.envRules;
+
+  // Accumulate any warnings to show once
+  const warnings: string[] = [];
+  if (loaded.warning) warnings.push(loaded.warning);
+  if (projectResult?.warning) warnings.push(projectResult.warning);
+  if (warnings.length > 0) {
+    console.warn(`[pi-guard] ${warnings.join("; ")}`);
+  }
+
   const context: GuardContext = {
     config: loaded.config,
     activeProfile: undefined,
     sessionRules: {},
   };
-  let configWarning = loaded.warning;
-
-  if (configWarning) {
-    console.warn(`[pi-guard] ${configWarning}`);
-  }
 
   // Register shortcut commands
   const shortcuts = context.config.shortcuts ?? {};
@@ -50,11 +60,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("guard", {
     description: "Manage pi-guard security settings",
     handler: async (args, ctx) => {
-      if (configWarning && ctx.hasUI) {
-        ctx.ui.notify(`[pi-guard] ${configWarning}`, "warning");
-        configWarning = undefined;
-      }
-
       const { action, target } = parseGuardArgs(args);
       const result = handleGuardCommand(action, target, context, ctx.cwd);
       ctx.ui.notify(result.message, result.type);
@@ -63,32 +68,20 @@ export default function (pi: ExtensionAPI) {
 
   // The core interception hook
   pi.on("tool_call", async (event, ctx) => {
-    if (configWarning && ctx.hasUI) {
-      ctx.ui.notify(`[pi-guard] ${configWarning}`, "warning");
-      configWarning = undefined;
-    }
-
     if (!context.config.enabled) return;
 
     const tool = event.toolName;
     const input = event.input as ToolCallInput;
 
-    // Get the effective rules (user + project + profile + session + env)
-    const projectResult = loadProjectConfig(ctx.cwd);
-    const projectRules = projectResult?.config.rules ?? {};
-    if (projectResult?.warning && ctx.hasUI) {
-      ctx.ui.notify(`[pi-guard] ${projectResult.warning}`, "warning");
-    }
-
-    const envRules = process.env.PI_GUARD ? JSON.parse(process.env.PI_GUARD) : undefined;
+    // Build effective rules: default → user → project → env → profile → session
     const profiles = context.config.profiles ?? {};
     const profileRules = context.activeProfile ? profiles[context.activeProfile] : undefined;
     const effectiveRules = buildEffectiveRules(
-      context.config.rules,
+      userRules,
       projectRules,
-      context.sessionRules,
       envRules,
       profileRules,
+      context.sessionRules,
     );
 
     // Check for global rule (single action for all tools)

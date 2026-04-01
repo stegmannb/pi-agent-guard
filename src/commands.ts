@@ -75,9 +75,9 @@ function buildListOutput(context: GuardContext, cwd: string): string {
   const effectiveRules = buildEffectiveRules(
     context.config.rules,
     projectRules,
-    context.sessionRules,
     envRules,
     profileRules,
+    context.sessionRules,
   );
 
   let output = `pi-guard: ${enabled}\n`;

@@ -194,12 +194,12 @@ test("getGuardConfigFromSettings", async (t) => {
 
 test("buildEffectiveRules", async (t) => {
   await t.test("defaults alone when all layers are empty", () => {
-    const result = buildEffectiveRules({}, {}, {}, undefined);
+    const result = buildEffectiveRules({}, {}, undefined, undefined, {});
     assert.deepEqual(result, DEFAULT_CONFIG.rules);
   });
 
   await t.test("user rules are merged with defaults", () => {
-    const result = buildEffectiveRules({ "mytool": "allow" }, {}, {}, undefined);
+    const result = buildEffectiveRules({ "mytool": "allow" }, {}, undefined, undefined, {});
     if (typeof result === "object") {
       assert.equal(result["mytool"], "allow");
       // Defaults are preserved - guaranteed to be object by defaults.ts
@@ -209,33 +209,33 @@ test("buildEffectiveRules", async (t) => {
   });
 
   await t.test("project rules override user rules", () => {
-    const result = buildEffectiveRules({ "npm": "ask" }, { "npm": "allow" }, {}, undefined);
+    const result = buildEffectiveRules({ "npm": "ask" }, { "npm": "allow" }, undefined, undefined, {});
     if (typeof result === "object") {
       assert.equal(result["npm"], "allow");
     }
   });
 
-  await t.test("session rules override project rules", () => {
-    const result = buildEffectiveRules({}, { "npm": "ask" }, { "npm": "allow" }, undefined);
+  await t.test("session rules override all other layers", () => {
+    const result = buildEffectiveRules({}, { "npm": "ask" }, undefined, undefined, { "npm": "allow" });
     if (typeof result === "object") {
       assert.equal(result["npm"], "allow");
     }
   });
 
-  await t.test("env rules override session rules", () => {
-    const result = buildEffectiveRules({}, {}, { "npm": "ask" }, { "npm": "deny" });
+  await t.test("session rules override env rules", () => {
+    const result = buildEffectiveRules({}, {}, { "npm": "ask" }, undefined, { "npm": "deny" });
     if (typeof result === "object") {
       assert.equal(result["npm"], "deny");
     }
   });
 
-  await t.test("single action env rules win", () => {
-    const result = buildEffectiveRules({ "bash": { "*": "ask" } }, {}, {}, "deny");
+  await t.test("single action session rules win over all", () => {
+    const result = buildEffectiveRules({ "bash": { "*": "ask" } }, {}, undefined, undefined, "deny");
     assert.equal(result, "deny");
   });
 
-  await t.test("single action session rules override user rules", () => {
-    const result = buildEffectiveRules({ "bash": { "*": "ask" } }, {}, "allow", undefined);
+  await t.test("single action env rules override user rules", () => {
+    const result = buildEffectiveRules({ "bash": { "*": "ask" } }, {}, "allow", undefined, {});
     assert.equal(result, "allow");
   });
 
@@ -243,9 +243,9 @@ test("buildEffectiveRules", async (t) => {
     const result = buildEffectiveRules(
       { "edit": { "*": "allow" } },
       {},
-      {},
       undefined,
-      { "edit": { "*": "ask" } }
+      { "edit": { "*": "ask" } },
+      {}
     );
     if (typeof result === "object") {
       assert.deepEqual(result["edit"], { "*": "ask" });
@@ -256,22 +256,22 @@ test("buildEffectiveRules", async (t) => {
     const result = buildEffectiveRules(
       {},
       {},
-      { "edit": { "*": "allow" } },
       undefined,
+      { "edit": { "*": "allow" } },
       { "edit": { "*": "ask" } }
     );
     if (typeof result === "object") {
-      assert.deepEqual(result["edit"], { "*": "allow" });
+      assert.deepEqual(result["edit"], { "*": "ask" });
     }
   });
 
-  await t.test("profile rules override project rules", () => {
+  await t.test("profile rules override env rules", () => {
     const result = buildEffectiveRules(
       {},
-      { "edit": { "*": "allow" } },
       {},
-      undefined,
-      { "edit": { "*": "ask" } }
+      { "edit": { "*": "allow" } },
+      { "edit": { "*": "ask" } },
+      {}
     );
     if (typeof result === "object") {
       assert.deepEqual(result["edit"], { "*": "ask" });

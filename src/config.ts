@@ -20,16 +20,16 @@ interface LoadedConfigResult {
 export function buildEffectiveRules(
   userRules: Rules,
   projectRules: Rules,
-  sessionRules: Rules,
   envRules: Rules | undefined,
-  profileRules?: Rules | undefined,
+  profileRules: Rules | undefined,
+  sessionRules: Rules,
 ): Rules {
   // Handle the case where rules is a single action (applies to all tools)
+  // Last match wins: session > profile > env > project > user
   if (typeof userRules === "string" || typeof projectRules === "string" || typeof sessionRules === "string" || typeof envRules === "string" || typeof profileRules === "string") {
-    // If any layer is a single action, that wins (last match wins)
-    if (typeof envRules === "string") return envRules;
-    if (typeof profileRules === "string") return profileRules;
     if (typeof sessionRules === "string") return sessionRules;
+    if (typeof profileRules === "string") return profileRules;
+    if (typeof envRules === "string") return envRules;
     if (typeof projectRules === "string") return projectRules;
     if (typeof userRules === "string") return userRules;
   }
@@ -38,8 +38,8 @@ export function buildEffectiveRules(
   const defaultRules = typeof DEFAULT_CONFIG.rules === "string" ? {} : DEFAULT_CONFIG.rules;
   const merged: Record<string, ToolRules> = { ...defaultRules };
 
-  // Layer order: default → user → project → profile → session → env
-  for (const layer of [userRules, projectRules, profileRules, sessionRules, envRules]) {
+  // Layer order: default → user → project → env → profile → session
+  for (const layer of [userRules, projectRules, envRules, profileRules, sessionRules]) {
     if (!layer || typeof layer === "string") continue;
     for (const [tool, rules] of Object.entries(layer)) {
       if (typeof rules === "string") {
@@ -267,7 +267,7 @@ function loadEnvRules(): Rules | undefined {
   return undefined;
 }
 
-export function loadConfig(): LoadedConfigResult {
+export function loadConfig(): LoadedConfigResult & { envRules: Rules | undefined } {
   const envRules = loadEnvRules();
 
   if (fs.existsSync(SETTINGS_PATH)) {
@@ -275,34 +275,19 @@ export function loadConfig(): LoadedConfigResult {
       const data = fs.readFileSync(SETTINGS_PATH, "utf-8");
       const parsed = JSON.parse(data);
       const result = getGuardConfigFromSettings(parsed);
-
-      // Merge env rules if present
-      if (envRules) {
-        result.config = {
-          ...result.config,
-          rules: buildEffectiveRules(
-            result.config.rules,
-            {},
-            {},
-            envRules,
-          ),
-        };
-      }
-
-      return result;
+      return { ...result, envRules };
     } catch {
       return {
-        config: { ...SAFE_FALLBACK_CONFIG, rules: envRules ?? SAFE_FALLBACK_CONFIG.rules },
+        config: { ...SAFE_FALLBACK_CONFIG },
         warning: "Failed to parse settings.json; using safe fallback (enabled=true, rules={}).",
+        envRules,
       };
     }
   }
 
   return {
-    config: {
-      ...DEFAULT_CONFIG,
-      rules: envRules ? buildEffectiveRules(DEFAULT_CONFIG.rules, {}, {}, envRules) : DEFAULT_CONFIG.rules,
-    },
+    config: { ...DEFAULT_CONFIG },
+    envRules,
   };
 }
 

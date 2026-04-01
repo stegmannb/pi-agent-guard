@@ -14,7 +14,8 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
-- Rule precedence now includes profile layer: `DEFAULT_CONFIG → user config → project config → profile → session rules → PI_GUARD`
+- Rule precedence corrected: `default → user → project → env → profile → session`. Session rules now correctly override env (`PI_GUARD`).
+- Configuration (user, project, env) is now loaded once at extension startup instead of on every tool call, improving performance.
 
 ## [1.1.0] - 2026-04-01
 

@@ -115,7 +115,7 @@ Simple string equality. Rule `"build"` only matches input `build`.
 ## Rule Precedence
 
 ```
-DEFAULT_CONFIG → user config → project config → profile → session rules → PI_GUARD
+default → user config → project config → env (PI_GUARD) → profile → session rules
 ```
 
 **Last match wins** within a tool's rules. Put catch-all `"*"` first, specific rules after:
