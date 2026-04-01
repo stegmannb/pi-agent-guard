@@ -17,6 +17,9 @@ import {
 } from "./handlers.ts";
 import type { Action, Rules, ToolCallInput } from "./types.ts";
 
+const block = (reason: string): { block: true; reason: string } =>
+  ({ block: true, reason: `[Blocked by pi-guard: ${reason}]` });
+
 export { parseGuardArgs };
 
 export default function (pi: ExtensionAPI) {
@@ -73,7 +76,6 @@ export default function (pi: ExtensionAPI) {
     const tool = event.toolName;
     const input = event.input as ToolCallInput;
 
-    // Build effective rules: default → user → project → env → profile → session
     const profiles = context.config.profiles ?? {};
     const profileRules = context.activeProfile ? profiles[context.activeProfile] : undefined;
     const effectiveRules = buildEffectiveRules(
@@ -84,95 +86,34 @@ export default function (pi: ExtensionAPI) {
       context.sessionRules,
     );
 
-    // Check for global rule (single action for all tools)
-    if (typeof effectiveRules === "string") {
-      const action = effectiveRules;
+    // Collapse global action and per-tool action into one value:
+    // - string effectiveRules → that action applies to all tools
+    // - object effectiveRules → look up tool, undefined means "ask"
+    const toolRules = typeof effectiveRules === "object" ? effectiveRules[tool] : effectiveRules;
+
+    if (typeof toolRules !== "object") {
+      const action: Action = toolRules ?? "ask";
       if (action === "allow") return;
-      if (action === "deny") {
-        return {
-          block: true,
-          reason: `[Blocked by pi-guard: Security policy]`,
-        };
-      }
-      // "ask" - fall through to interactive handling
-    }
-
-    // Get tool-specific rules
-    const toolRules = typeof effectiveRules === "object" ? effectiveRules[tool] : undefined;
-
-    if (!toolRules) {
-      // No rules for this tool - use default action ("ask")
-      if (!ctx.hasUI) {
-        return {
-          block: true,
-          reason: `[Blocked by pi-guard: No interactive session available]`,
-        };
-      }
-      // Interactive mode - prompt for approval
+      if (action === "deny") return block("Security policy");
+      if (!ctx.hasUI) return block("No interactive session available");
       return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
     }
 
-    // Handle whole-tool action (no pattern matching needed)
-    if (typeof toolRules === "string") {
-      const action = toolRules;
-      if (action === "allow") return;
-      if (action === "deny") {
-        return {
-          block: true,
-          reason: `[Blocked by pi-guard: Security policy]`,
-        };
-      }
-      // "ask" - prompt for approval
-      if (!ctx.hasUI) {
-        return {
-          block: true,
-          reason: `[Blocked by pi-guard: No interactive session available]`,
-        };
-      }
-      return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
-    }
+    const matcher = (context.config.matchers ?? {})[tool];
 
-    // Get matcher for this tool
-    const matchers = context.config.matchers ?? {};
-    const matcher = matchers[tool];
-
-    // If no matcher, use whole-tool logic (already handled above if action is allow/deny)
     if (!matcher) {
-      // For tools without matchers, check for catch-all "*"
-      const defaultAction = toolRules["*"];
-      if (defaultAction === "allow") return;
-      if (defaultAction === "deny") {
-        return {
-          block: true,
-          reason: `[Blocked by pi-guard: Security policy]`,
-        };
-      }
-      if (!ctx.hasUI) {
-        return {
-          block: true,
-          reason: `[Blocked by pi-guard: No interactive session available]`,
-        };
-      }
+      const action: Action = toolRules["*"] ?? "ask";
+      if (action === "allow") return;
+      if (action === "deny") return block("Security policy");
+      if (!ctx.hasUI) return block("No interactive session available");
       return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
     }
 
-    // Extract input based on matcher param
     const value = input[matcher.param];
     if (typeof value !== "string" || value.trim() === "") return;
 
-    // Handle bash tool specially (needs AST parsing)
-    if (matcher.type === "bash") {
-      return handleBashTool(pi, tool, value, toolRules, ctx, context.sessionRules);
-    }
-
-    // Handle glob-based tools (read, edit, write)
-    if (matcher.type === "glob") {
-      return handleGlobTool(pi, tool, value, toolRules, ctx, context.sessionRules);
-    }
-
-    // Handle exact-match tools
-    if (matcher.type === "exact") {
-      return handleExactTool(pi, tool, value, toolRules, ctx, context.sessionRules);
-    }
+    if (matcher.type === "bash") return handleBashTool(pi, tool, value, toolRules, ctx, context.sessionRules);
+    if (matcher.type === "glob") return handleGlobTool(pi, tool, value, toolRules, ctx, context.sessionRules);
+    if (matcher.type === "exact") return handleExactTool(pi, tool, value, toolRules, ctx, context.sessionRules);
   });
 }
