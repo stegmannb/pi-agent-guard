@@ -5,6 +5,12 @@ import {
 } from "./config.ts";
 import type { Action, GuardConfig } from "./types.ts";
 
+export interface GuardContext {
+  config: GuardConfig;
+  activeProfile: string | undefined;
+  sessionRules: Record<string, Record<string, Action>>;
+}
+
 export function parseGuardArgs(args: string): { action: string; target: string } {
   const trimmed = args.trim();
   if (!trimmed) return { action: "", target: "" };
@@ -15,25 +21,21 @@ export function parseGuardArgs(args: string): { action: string; target: string }
   return { action, target };
 }
 
-export function handleProfileCommand(
-  config: GuardConfig,
-  activeProfile: string | undefined,
+function handleProfileCommand(
+  context: GuardContext,
   target: string | undefined,
-): { activeProfile: string | undefined; message: string; type: "info" | "warning" } {
-  const profiles = config.profiles ?? {};
+): { message: string; type: "info" | "warning" } {
+  const profiles = context.config.profiles ?? {};
   const profileNames = Object.keys(profiles);
 
   if (!target) {
-    // Show current profile and available profiles
-    if (activeProfile) {
+    if (context.activeProfile) {
       return {
-        activeProfile,
-        message: `Active profile: ${activeProfile}\n\nAvailable profiles: ${profileNames.join(", ") || "(none)"}\n\nUse /guard profile <name> to activate\nUse /guard profile off to deactivate`,
+        message: `Active profile: ${context.activeProfile}\n\nAvailable profiles: ${profileNames.join(", ") || "(none)"}\n\nUse /guard profile <name> to activate\nUse /guard profile off to deactivate`,
         type: "info" as const,
       };
     } else {
       return {
-        activeProfile: undefined,
         message: `No profile active\n\nAvailable profiles: ${profileNames.join(", ") || "(none)"}\n\nUse /guard profile <name> to activate`,
         type: "info" as const,
       };
@@ -41,61 +43,46 @@ export function handleProfileCommand(
   }
 
   if (target === "off") {
-    return {
-      activeProfile: undefined,
-      message: "Profile deactivated",
-      type: "info" as const,
-    };
+    context.activeProfile = undefined;
+    return { message: "Profile deactivated", type: "info" as const };
   }
 
   if (!(target in profiles)) {
     return {
-      activeProfile,
       message: `Unknown profile: ${target}\n\nAvailable profiles: ${profileNames.join(", ") || "(none)"}`,
       type: "warning" as const,
     };
   }
 
-  return {
-    activeProfile: target,
-    message: `Profile activated: ${target}`,
-    type: "info" as const,
-  };
+  context.activeProfile = target;
+  return { message: `Profile activated: ${target}`, type: "info" as const };
 }
 
-export function handleToggleCommand(config: GuardConfig): { config: GuardConfig; message: string } {
-  config.enabled = !config.enabled;
-  saveConfig(config);
-  return {
-    config,
-    message: `pi-guard is now ${config.enabled ? "ENABLED" : "DISABLED"}`,
-  };
+function handleToggleCommand(context: GuardContext): string {
+  context.config.enabled = !context.config.enabled;
+  saveConfig(context.config);
+  return `pi-guard is now ${context.config.enabled ? "ENABLED" : "DISABLED"}`;
 }
 
-export function buildListOutput(
-  config: GuardConfig,
-  activeProfile: string | undefined,
-  sessionRules: Record<string, Record<string, Action>>,
-  cwd: string,
-): string {
-  const enabled = config.enabled ? "ENABLED" : "DISABLED";
-  const profiles = config.profiles ?? {};
+function buildListOutput(context: GuardContext, cwd: string): string {
+  const enabled = context.config.enabled ? "ENABLED" : "DISABLED";
+  const profiles = context.config.profiles ?? {};
 
   const projectResult = loadProjectConfig(cwd);
   const projectRules = projectResult?.config.rules ?? {};
   const envRules = process.env.PI_GUARD ? JSON.parse(process.env.PI_GUARD) : undefined;
-  const profileRules = activeProfile ? profiles[activeProfile] : undefined;
+  const profileRules = context.activeProfile ? profiles[context.activeProfile] : undefined;
   const effectiveRules = buildEffectiveRules(
-    config.rules,
+    context.config.rules,
     projectRules,
-    sessionRules,
+    context.sessionRules,
     envRules,
     profileRules,
   );
 
   let output = `pi-guard: ${enabled}\n`;
-  if (activeProfile) {
-    output += `Profile: ${activeProfile}\n`;
+  if (context.activeProfile) {
+    output += `Profile: ${context.activeProfile}\n`;
   }
   output += "\n";
 
@@ -118,34 +105,23 @@ export function buildListOutput(
   return output;
 }
 
-export type GuardCommandResult =
-  | { type: "profile"; activeProfile: string | undefined; message: string; messageType: "info" | "warning" }
-  | { type: "toggle"; config: GuardConfig; message: string }
-  | { type: "list"; output: string }
-  | { type: "usage"; message: string };
-
 export function handleGuardCommand(
   action: string,
   target: string | undefined,
-  config: GuardConfig,
-  activeProfile: string | undefined,
-  sessionRules: Record<string, Record<string, Action>>,
+  context: GuardContext,
   cwd: string,
-): GuardCommandResult {
+): { message: string; type: "info" | "warning" } {
   if (action === "toggle") {
-    const result = handleToggleCommand(config);
-    return { type: "toggle", config: result.config, message: result.message };
+    return { message: handleToggleCommand(context), type: "info" };
   }
 
   if (action === "profile") {
-    const result = handleProfileCommand(config, activeProfile, target);
-    return { type: "profile", activeProfile: result.activeProfile, message: result.message, messageType: result.type };
+    return handleProfileCommand(context, target);
   }
 
   if (action === "list") {
-    const output = buildListOutput(config, activeProfile, sessionRules, cwd);
-    return { type: "list", output };
+    return { message: buildListOutput(context, cwd), type: "info" };
   }
 
-  return { type: "usage", message: "Usage: /guard <toggle|profile|list>" };
+  return { message: "Usage: /guard <toggle|profile|list>", type: "warning" };
 }

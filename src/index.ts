@@ -4,6 +4,7 @@ import {
   loadProjectConfig,
   buildEffectiveRules,
 } from "./config.ts";
+import type { GuardContext } from "./commands.ts";
 import {
   parseGuardArgs,
   handleGuardCommand,
@@ -14,44 +15,33 @@ import {
   handleGlobTool,
   handleExactTool,
 } from "./handlers.ts";
-import type { Action, ToolCallInput, GuardConfig } from "./types.ts";
+import type { Action, ToolCallInput } from "./types.ts";
 
 export { parseGuardArgs };
 
 export default function (pi: ExtensionAPI) {
   const loaded = loadConfig();
-  let config: GuardConfig = loaded.config;
+  const context: GuardContext = {
+    config: loaded.config,
+    activeProfile: undefined,
+    sessionRules: {},
+  };
   let configWarning = loaded.warning;
-  // Session rules are stored per-tool
-  const sessionRules: Record<string, Record<string, Action>> = {};
-  // Active profile (session-only state)
-  let activeProfile: string | undefined;
 
   if (configWarning) {
     console.warn(`[pi-guard] ${configWarning}`);
   }
 
   // Register shortcut commands
-  const shortcuts = config.shortcuts ?? {};
+  const shortcuts = context.config.shortcuts ?? {};
   for (const [shortcut, subcommand] of Object.entries(shortcuts)) {
     if (!subcommand) continue;
     pi.registerCommand(shortcut, {
       description: `pi-guard shortcut: ${subcommand}`,
       handler: async (_args, ctx) => {
         const { action, target } = parseGuardArgs(subcommand);
-        const result = handleGuardCommand(action, target, config, activeProfile, sessionRules, ctx.cwd);
-
-        if (result.type === "profile") {
-          activeProfile = result.activeProfile;
-          ctx.ui.notify(result.message, result.messageType);
-        } else if (result.type === "toggle") {
-          config = result.config;
-          ctx.ui.notify(result.message, "info");
-        } else if (result.type === "list") {
-          ctx.ui.notify(result.output, "info");
-        } else {
-          ctx.ui.notify(result.message, "warning");
-        }
+        const result = handleGuardCommand(action, target, context, ctx.cwd);
+        ctx.ui.notify(result.message, result.type);
       },
     });
   }
@@ -66,19 +56,8 @@ export default function (pi: ExtensionAPI) {
       }
 
       const { action, target } = parseGuardArgs(args);
-      const result = handleGuardCommand(action, target, config, activeProfile, sessionRules, ctx.cwd);
-
-      if (result.type === "profile") {
-        activeProfile = result.activeProfile;
-        ctx.ui.notify(result.message, result.messageType);
-      } else if (result.type === "toggle") {
-        config = result.config;
-        ctx.ui.notify(result.message, "info");
-      } else if (result.type === "list") {
-        ctx.ui.notify(result.output, "info");
-      } else {
-        ctx.ui.notify(result.message, "warning");
-      }
+      const result = handleGuardCommand(action, target, context, ctx.cwd);
+      ctx.ui.notify(result.message, result.type);
     },
   });
 
@@ -89,7 +68,7 @@ export default function (pi: ExtensionAPI) {
       configWarning = undefined;
     }
 
-    if (!config.enabled) return;
+    if (!context.config.enabled) return;
 
     const tool = event.toolName;
     const input = event.input as ToolCallInput;
@@ -102,12 +81,12 @@ export default function (pi: ExtensionAPI) {
     }
 
     const envRules = process.env.PI_GUARD ? JSON.parse(process.env.PI_GUARD) : undefined;
-    const profiles = config.profiles ?? {};
-    const profileRules = activeProfile ? profiles[activeProfile] : undefined;
+    const profiles = context.config.profiles ?? {};
+    const profileRules = context.activeProfile ? profiles[context.activeProfile] : undefined;
     const effectiveRules = buildEffectiveRules(
-      config.rules,
+      context.config.rules,
       projectRules,
-      sessionRules,
+      context.sessionRules,
       envRules,
       profileRules,
     );
@@ -137,7 +116,7 @@ export default function (pi: ExtensionAPI) {
         };
       }
       // Interactive mode - prompt for approval
-      return handleInteractiveApproval(pi, tool, input, ctx, sessionRules);
+      return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
     }
 
     // Handle whole-tool action (no pattern matching needed)
@@ -157,11 +136,11 @@ export default function (pi: ExtensionAPI) {
           reason: `[Blocked by pi-guard: No interactive session available]`,
         };
       }
-      return handleInteractiveApproval(pi, tool, input, ctx, sessionRules);
+      return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
     }
 
     // Get matcher for this tool
-    const matchers = config.matchers ?? {};
+    const matchers = context.config.matchers ?? {};
     const matcher = matchers[tool];
 
     // If no matcher, use whole-tool logic (already handled above if action is allow/deny)
@@ -181,7 +160,7 @@ export default function (pi: ExtensionAPI) {
           reason: `[Blocked by pi-guard: No interactive session available]`,
         };
       }
-      return handleInteractiveApproval(pi, tool, input, ctx, sessionRules);
+      return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
     }
 
     // Extract input based on matcher param
@@ -190,17 +169,17 @@ export default function (pi: ExtensionAPI) {
 
     // Handle bash tool specially (needs AST parsing)
     if (matcher.type === "bash") {
-      return handleBashTool(pi, tool, value, toolRules, ctx, sessionRules);
+      return handleBashTool(pi, tool, value, toolRules, ctx, context.sessionRules);
     }
 
     // Handle glob-based tools (read, edit, write)
     if (matcher.type === "glob") {
-      return handleGlobTool(pi, tool, value, toolRules, ctx, sessionRules);
+      return handleGlobTool(pi, tool, value, toolRules, ctx, context.sessionRules);
     }
 
     // Handle exact-match tools
     if (matcher.type === "exact") {
-      return handleExactTool(pi, tool, value, toolRules, ctx, sessionRules);
+      return handleExactTool(pi, tool, value, toolRules, ctx, context.sessionRules);
     }
   });
 }
