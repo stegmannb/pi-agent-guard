@@ -22,11 +22,13 @@ export function buildEffectiveRules(
   projectRules: Rules,
   sessionRules: Rules,
   envRules: Rules | undefined,
+  profileRules?: Rules | undefined,
 ): Rules {
   // Handle the case where rules is a single action (applies to all tools)
-  if (typeof userRules === "string" || typeof projectRules === "string" || typeof sessionRules === "string" || typeof envRules === "string") {
-    // If any layer is a single action, that wins
+  if (typeof userRules === "string" || typeof projectRules === "string" || typeof sessionRules === "string" || typeof envRules === "string" || typeof profileRules === "string") {
+    // If any layer is a single action, that wins (last match wins)
     if (typeof envRules === "string") return envRules;
+    if (typeof profileRules === "string") return profileRules;
     if (typeof sessionRules === "string") return sessionRules;
     if (typeof projectRules === "string") return projectRules;
     if (typeof userRules === "string") return userRules;
@@ -36,7 +38,8 @@ export function buildEffectiveRules(
   const defaultRules = typeof DEFAULT_CONFIG.rules === "string" ? {} : DEFAULT_CONFIG.rules;
   const merged: Record<string, ToolRules> = { ...defaultRules };
 
-  for (const layer of [userRules, projectRules, sessionRules, envRules]) {
+  // Layer order: default → user → project → profile → session → env
+  for (const layer of [userRules, projectRules, profileRules, sessionRules, envRules]) {
     if (!layer || typeof layer === "string") continue;
     for (const [tool, rules] of Object.entries(layer)) {
       if (typeof rules === "string") {
@@ -154,14 +157,76 @@ export function validateLoadedGuardConfig(input: unknown): LoadedConfigResult {
     }
   }
 
+  let profiles: Record<string, import("./types.ts").Profile> | undefined;
+  if (cfg.profiles !== undefined) {
+    if (cfg.profiles && typeof cfg.profiles === "object" && !Array.isArray(cfg.profiles)) {
+      const validProfiles: Record<string, import("./types.ts").Profile> = {};
+      for (const [profileName, profileRules] of Object.entries(cfg.profiles as Record<string, unknown>)) {
+        if (typeof profileRules === "string" && (profileRules === "allow" || profileRules === "ask" || profileRules === "deny")) {
+          validProfiles[profileName] = profileRules;
+        } else if (profileRules && typeof profileRules === "object" && !Array.isArray(profileRules)) {
+          const validRules: Record<string, ToolRules> = {};
+          for (const [tool, toolRules] of Object.entries(profileRules as Record<string, unknown>)) {
+            if (typeof toolRules === "string" && (toolRules === "allow" || toolRules === "ask" || toolRules === "deny")) {
+              validRules[tool] = toolRules;
+            } else if (toolRules && typeof toolRules === "object" && !Array.isArray(toolRules)) {
+              const { rules: validated, warnings: toolWarnings } = validateToolRules(toolRules);
+              validRules[tool] = validated;
+              warnings.push(...toolWarnings.map(w => `Profile "${profileName}", tool "${tool}": ${w}`));
+            } else {
+              warnings.push(`Profile "${profileName}": Invalid rules for tool "${tool}"`);
+            }
+          }
+          validProfiles[profileName] = validRules;
+        } else {
+          warnings.push(`Profile "${profileName}": must be a single action or an object mapping tool names to rules`);
+        }
+      }
+      profiles = validProfiles;
+    } else {
+      warnings.push("profiles must be an object mapping profile names to rules");
+    }
+  }
+
+  let shortcuts: Record<string, string> | undefined;
+  if (cfg.shortcuts !== undefined) {
+    if (cfg.shortcuts && typeof cfg.shortcuts === "object" && !Array.isArray(cfg.shortcuts)) {
+      const validShortcuts: Record<string, string> = {};
+      for (const [shortcut, target] of Object.entries(cfg.shortcuts as Record<string, unknown>)) {
+        if (typeof target === "string") {
+          validShortcuts[shortcut] = target;
+        } else {
+          warnings.push(`Shortcut "${shortcut}": must be a string`);
+        }
+      }
+      shortcuts = validShortcuts;
+    } else {
+      warnings.push("shortcuts must be an object mapping shortcut names to profile names or 'off'");
+    }
+  }
+
   if (warnings.length > 0) {
     return {
-      config: { enabled, matchers, rules },
+      config: {
+        enabled,
+        matchers,
+        rules,
+        ...(profiles && { profiles }),
+        ...(shortcuts && { shortcuts }),
+      },
       warning: `Invalid guard config fields (${warnings.join("; ")}); using safe values for invalid fields.`,
     };
   }
 
-  return { config: { enabled, matchers, rules } };
+  return {
+    config: {
+      enabled,
+      matchers,
+      rules,
+      ...(profiles && { profiles }),
+      ...(shortcuts && { shortcuts }),
+    },
+  };
 }
 
 export function getGuardConfigFromSettings(input: unknown): LoadedConfigResult {
@@ -254,6 +319,8 @@ export function saveConfig(config: GuardConfig) {
       enabled: config.enabled,
       ...(config.matchers && Object.keys(config.matchers).length > 0 && { matchers: config.matchers }),
       rules: config.rules,
+      ...(config.profiles && Object.keys(config.profiles).length > 0 && { profiles: config.profiles }),
+      ...(config.shortcuts && Object.keys(config.shortcuts).length > 0 && { shortcuts: config.shortcuts }),
     };
 
     fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), "utf-8");

@@ -29,9 +29,86 @@ export default function (pi: ExtensionAPI) {
   let configWarning = loaded.warning;
   // Session rules are stored per-tool
   const sessionRules: Record<string, Record<string, Action>> = {};
+  // Active profile (session-only state)
+  let activeProfile: string | undefined;
 
   if (configWarning) {
     console.warn(`[pi-guard] ${configWarning}`);
+  }
+
+  // Register shortcut commands
+  const shortcuts = config.shortcuts ?? {};
+  for (const [shortcut, subcommand] of Object.entries(shortcuts)) {
+    if (!subcommand) continue;
+    pi.registerCommand(shortcut, {
+      description: `pi-guard shortcut: ${subcommand}`,
+      handler: async (_args, ctx) => {
+        // Parse subcommand (e.g., "profile read-write" -> ["profile", "read-write"])
+        const parts = subcommand.trim().split(/\s+/);
+        const action = parts[0] ?? "";
+        const target = parts.slice(1).join(" ");
+
+        if (action === "profile") {
+          if (!target || target === "off") {
+            activeProfile = undefined;
+            ctx.ui.notify("Profile deactivated", "info");
+          } else {
+            const profiles = config.profiles ?? {};
+            if (!(target in profiles)) {
+              ctx.ui.notify(`Unknown profile: ${target}\n\nAvailable profiles: ${Object.keys(profiles).join(", ") || "(none)"}`, "warning");
+              return;
+            }
+            activeProfile = target;
+            ctx.ui.notify(`Profile activated: ${target}`, "info");
+          }
+        } else if (action === "toggle") {
+          config.enabled = !config.enabled;
+          saveConfig(config);
+          ctx.ui.notify(`pi-guard is now ${config.enabled ? "ENABLED" : "DISABLED"}`, "info");
+        } else if (action === "list") {
+          // Reuse list logic from main command
+          const enabled = config.enabled ? "ENABLED" : "DISABLED";
+          const profiles = config.profiles ?? {};
+          const projectResult = loadProjectConfig(ctx.cwd);
+          const projectRules = projectResult?.config.rules ?? {};
+          const envRules = process.env.PI_GUARD ? JSON.parse(process.env.PI_GUARD) : undefined;
+          const profileRules = activeProfile ? profiles[activeProfile] : undefined;
+          const effectiveRules = buildEffectiveRules(
+            config.rules,
+            projectRules,
+            sessionRules,
+            envRules,
+            profileRules,
+          );
+
+          let output = `pi-guard: ${enabled}\n`;
+          if (activeProfile) {
+            output += `Profile: ${activeProfile}\n`;
+          }
+          output += "\n";
+
+          if (typeof effectiveRules === "string") {
+            output += `Global rule: ${effectiveRules}\n`;
+          } else {
+            for (const [tool, rules] of Object.entries(effectiveRules)) {
+              output += `${tool}:\n`;
+              if (typeof rules === "string") {
+                output += `  ${rules}\n`;
+              } else {
+                for (const [pattern, act] of Object.entries(rules)) {
+                  output += `  ${pattern}: ${act}\n`;
+                }
+              }
+              output += "\n";
+            }
+          }
+
+          ctx.ui.notify(output, "info");
+        } else {
+          ctx.ui.notify(`Unknown shortcut subcommand: ${subcommand}`, "warning");
+        }
+      },
+    });
   }
 
   // Settings Management Command
@@ -49,21 +126,51 @@ export default function (pi: ExtensionAPI) {
         config.enabled = !config.enabled;
         saveConfig(config);
         ctx.ui.notify(`pi-guard is now ${config.enabled ? "ENABLED" : "DISABLED"}`, "info");
+      } else if (action === "profile") {
+        if (!target) {
+          // Show current profile and available profiles
+          const profiles = config.profiles ?? {};
+          const profileNames = Object.keys(profiles);
+          
+          if (activeProfile) {
+            ctx.ui.notify(`Active profile: ${activeProfile}\n\nAvailable profiles: ${profileNames.join(", ") || "(none)"}\n\nUse /guard profile <name> to activate\nUse /guard profile off to deactivate`, "info");
+          } else {
+            ctx.ui.notify(`No profile active\n\nAvailable profiles: ${profileNames.join(", ") || "(none)"}\n\nUse /guard profile <name> to activate`, "info");
+          }
+        } else if (target === "off") {
+          activeProfile = undefined;
+          ctx.ui.notify("Profile deactivated", "info");
+        } else {
+          const profiles = config.profiles ?? {};
+          if (!(target in profiles)) {
+            ctx.ui.notify(`Unknown profile: ${target}\n\nAvailable profiles: ${Object.keys(profiles).join(", ") || "(none)"}`, "warning");
+            return;
+          }
+          activeProfile = target;
+          ctx.ui.notify(`Profile activated: ${target}`, "info");
+        }
       } else if (action === "list") {
         const enabled = config.enabled ? "ENABLED" : "DISABLED";
+        const profiles = config.profiles ?? {};
 
         // Build effective rules (user + defaults + project + session + env)
         const projectResult = loadProjectConfig(ctx.cwd);
         const projectRules = projectResult?.config.rules ?? {};
         const envRules = process.env.PI_GUARD ? JSON.parse(process.env.PI_GUARD) : undefined;
+        const profileRules = activeProfile ? profiles[activeProfile] : undefined;
         const effectiveRules = buildEffectiveRules(
           config.rules,
           projectRules,
           sessionRules,
           envRules,
+          profileRules,
         );
 
-        let output = `pi-guard: ${enabled}\n\n`;
+        let output = `pi-guard: ${enabled}\n`;
+        if (activeProfile) {
+          output += `Profile: ${activeProfile}\n`;
+        }
+        output += "\n";
 
         if (typeof effectiveRules === "string") {
           output += `Global rule: ${effectiveRules}\n`;
@@ -83,7 +190,7 @@ export default function (pi: ExtensionAPI) {
 
         ctx.ui.notify(output, "info");
       } else {
-        ctx.ui.notify("Usage: /guard <toggle|list>", "warning");
+        ctx.ui.notify("Usage: /guard <toggle|profile|list>", "warning");
       }
     },
   });
@@ -100,7 +207,7 @@ export default function (pi: ExtensionAPI) {
     const tool = event.toolName;
     const input = event.input as ToolCallInput;
 
-    // Get the effective rules (user + project + session + env)
+    // Get the effective rules (user + project + profile + session + env)
     const projectResult = loadProjectConfig(ctx.cwd);
     const projectRules = projectResult?.config.rules ?? {};
     if (projectResult?.warning && ctx.hasUI) {
@@ -108,11 +215,14 @@ export default function (pi: ExtensionAPI) {
     }
 
     const envRules = process.env.PI_GUARD ? JSON.parse(process.env.PI_GUARD) : undefined;
+    const profiles = config.profiles ?? {};
+    const profileRules = activeProfile ? profiles[activeProfile] : undefined;
     const effectiveRules = buildEffectiveRules(
       config.rules,
       projectRules,
       sessionRules,
       envRules,
+      profileRules,
     );
 
     // Check for global rule (single action for all tools)

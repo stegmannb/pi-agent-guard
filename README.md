@@ -115,7 +115,7 @@ Simple string equality. Rule `"build"` only matches input `build`.
 ## Rule Precedence
 
 ```
-DEFAULT_CONFIG → user config → project config → PI_GUARD → session rules
+DEFAULT_CONFIG → user config → project config → profile → session rules → PI_GUARD
 ```
 
 **Last match wins** within a tool's rules. Put catch-all `"*"` first, specific rules after:
@@ -155,15 +155,68 @@ To trust the agent with file modifications (useful in containers or trusted envi
 }
 ```
 
-## Commands
+## Profiles
+
+Profiles let you define named rule overlays that can be activated during a session. This is useful for switching between permission modes without editing config.
+
+The default state is "read-only" — edit and write tools require approval. Define a profile that allows writes when you want to make changes:
+
+```json
+{
+  "guard": {
+    "profiles": {
+      "read-write": {
+        "edit": { "*": "allow" },
+        "write": { "*": "allow" }
+      }
+    },
+    "shortcuts": {
+      "rw": "profile read-write",
+      "ro": "profile off"
+    }
+  }
+}
+```
+
+Now `/rw` activates the read-write profile, and `/ro` deactivates it (returning to read-only defaults).
+
+### Profile Commands
+
+```
+/guard profile           # Show active profile and available profiles
+/guard profile <name>    # Activate a profile by name
+/guard profile off       # Deactivate current profile
+```
+
+### Shortcuts
+
+Shortcuts are custom commands that execute guard subcommands. Define them in config:
+
+```json
+{
+  "guard": {
+    "shortcuts": {
+      "rw": "profile read-write",
+      "ro": "profile off",
+      "rules": "list",
+      "toggle": "toggle"
+    }
+  }
+}
+```
+
+Shortcuts can reference any guard subcommand: `profile`, `list`, or `toggle`.## Commands
 
 ### `/guard`
 
 Manage pi-guard security settings.
 
 ```
-/guard toggle    # Enable/disable guard
-/guard list      # Show current rules
+/guard toggle           # Enable/disable guard
+/guard list             # Show current rules
+/guard profile          # Show active profile and available profiles
+/guard profile <name>   # Activate a profile by name
+/guard profile off      # Deactivate current profile
 ```
 
 ## License

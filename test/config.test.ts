@@ -122,6 +122,60 @@ test("validateLoadedGuardConfig", async (t) => {
     assert.deepEqual(result.config.rules, {});
     assert.ok(result.warning?.includes("rules"));
   });
+
+  await t.test("accepts valid profiles", () => {
+    const result = validateLoadedGuardConfig({
+      profiles: {
+        "read-write": {
+          "edit": { "*": "allow" },
+          "write": { "*": "allow" }
+        }
+      }
+    });
+    assert.deepEqual(result.config.profiles, {
+      "read-write": {
+        "edit": { "*": "allow" },
+        "write": { "*": "allow" }
+      }
+    });
+    assert.equal(result.warning, undefined);
+  });
+
+  await t.test("accepts profile with single action", () => {
+    const result = validateLoadedGuardConfig({
+      profiles: {
+        "deny-all": "deny"
+      }
+    });
+    assert.equal(result.config.profiles?.["deny-all"], "deny");
+    assert.equal(result.warning, undefined);
+  });
+
+  await t.test("accepts valid shortcuts", () => {
+    const result = validateLoadedGuardConfig({
+      profiles: {
+        "read-write": { "edit": { "*": "allow" } }
+      },
+      shortcuts: {
+        "rw": "read-write",
+        "ro": "off"
+      }
+    });
+    assert.deepEqual(result.config.shortcuts, {
+      "rw": "read-write",
+      "ro": "off"
+    });
+    assert.equal(result.warning, undefined);
+  });
+
+  await t.test("rejects invalid profiles with invalid action", () => {
+    const result = validateLoadedGuardConfig({
+      profiles: {
+        "bad": { "edit": { "*": "maybe" } }
+      }
+    });
+    assert.ok(result.warning?.includes("maybe"));
+  });
 });
 
 test("getGuardConfigFromSettings", async (t) => {
@@ -183,5 +237,44 @@ test("buildEffectiveRules", async (t) => {
   await t.test("single action session rules override user rules", () => {
     const result = buildEffectiveRules({ "bash": { "*": "ask" } }, {}, "allow", undefined);
     assert.equal(result, "allow");
+  });
+
+  await t.test("profile rules are merged with other layers", () => {
+    const result = buildEffectiveRules(
+      { "edit": { "*": "allow" } },
+      {},
+      {},
+      undefined,
+      { "edit": { "*": "ask" } }
+    );
+    if (typeof result === "object") {
+      assert.deepEqual(result["edit"], { "*": "ask" });
+    }
+  });
+
+  await t.test("session rules override profile rules", () => {
+    const result = buildEffectiveRules(
+      {},
+      {},
+      { "edit": { "*": "allow" } },
+      undefined,
+      { "edit": { "*": "ask" } }
+    );
+    if (typeof result === "object") {
+      assert.deepEqual(result["edit"], { "*": "allow" });
+    }
+  });
+
+  await t.test("profile rules override project rules", () => {
+    const result = buildEffectiveRules(
+      {},
+      { "edit": { "*": "allow" } },
+      {},
+      undefined,
+      { "edit": { "*": "ask" } }
+    );
+    if (typeof result === "object") {
+      assert.deepEqual(result["edit"], { "*": "ask" });
+    }
   });
 });

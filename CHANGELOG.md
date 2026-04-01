@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Profiles** — Named rule overlays that can be activated during a session. Useful for switching between permission modes (e.g., read-only vs read-write) without editing config.
+- **Shortcuts** — Custom commands that activate profiles or deactivate them. Define `/rw` to activate a "read-write" profile, `/ro` to deactivate.
+- `/guard profile` — Show active profile and available profiles
+- `/guard profile <name>` — Activate a profile by name
+- `/guard profile off` — Deactivate current profile
+
+### Changed
+
+- Rule precedence now includes profile layer: `DEFAULT_CONFIG → user config → project config → profile → session rules → PI_GUARD`
+
 ## [1.1.0] - 2026-04-01
 
 ### Added

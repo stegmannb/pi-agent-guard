@@ -29,11 +29,16 @@ export type Rules = Action | Record<string, ToolRules>;
 /** Custom matchers for additional tools. */
 export type Matchers = Record<string, Matcher>;
 
+/** Named profile with rule overrides. */
+export type Profile = Rules;
+
 /** Full configuration for pi-guard. */
 export interface GuardConfig {
   enabled: boolean;
   matchers?: Matchers;
   rules: Rules;
+  profiles?: Record<string, Profile>;
+  shortcuts?: Record<string, string | undefined>;
 }
 
 /** Result of a permission check. */
