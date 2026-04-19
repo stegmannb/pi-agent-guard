@@ -87,11 +87,7 @@ function renderRedirect(redirect: Redirect, source: string): string {
 
 function renderFullHeredoc(redirect: Redirect, source: string): string {
 	const prefix = `${redirectPrefix(redirect)}${heredocTargetDisplay(redirect, source)}↵`;
-	return (
-		prefix +
-		(redirect.content ?? "").replace(/\n/g, "↵") +
-		heredocMarker(redirect, source)
-	);
+	return `${prefix}${(redirect.content ?? "").replace(/\n/g, "↵")}${heredocMarker(redirect, source)}`;
 }
 
 function renderElidedHeredoc(
@@ -107,7 +103,7 @@ function renderElidedHeredoc(
 		return prefix + full;
 	}
 
-	return `${prefix + content.slice(0, argMaxLength)}…`;
+	return `${prefix}${content.slice(0, argMaxLength)}…`;
 }
 
 function redirectPrefix(redirect: Redirect): string {
@@ -207,9 +203,6 @@ function elidePath(p: string): string {
 }
 
 function shrinkPathToken(token: string, targetLength: number): string {
-	if (token.length <= targetLength) return token;
-	if (targetLength <= 1) return "…";
-
 	const lastSlash = token.lastIndexOf("/");
 	if (lastSlash <= 0) {
 		return `${token.slice(0, targetLength - 1)}…`;
