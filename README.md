@@ -157,9 +157,38 @@ To trust the agent with file modifications (useful in containers or trusted envi
 
 ## Profiles
 
-Profiles let you define named rule overlays that can be activated during a session. This is useful for switching between permission modes without editing config.
+Profiles let you define named rule overlays that can be activated during a session. This is useful for switching between permission modes without editing config. Only one profile can be active at a time — activating a new one replaces the previous.
 
-The default state is "read-only" — edit and write tools require approval. Define a profile that allows writes when you want to make changes:
+Profiles are layered between env (`PI_GUARD`) and session rules in the precedence chain. Rules are merged per-pattern (last match wins), so a profile with `"*": "allow"` makes earlier `*` rules irrelevant, but specific rules from earlier layers (like `"rm": "deny"`) still apply unless the profile has its own pattern for them.
+
+For example, define a profile that allows writes so you can switch to it when you want to make changes:
+
+```json
+{
+  "guard": {
+    "profiles": {
+      "read-write": {
+        "edit": { "*": "allow" },
+        "write": { "*": "allow" }
+      }
+    }
+  }
+}
+```
+
+Activate it with `/guard profile read-write` and deactivate with `/guard profile off`.
+
+### Profile Commands
+
+```
+/guard profile           # Show active profile and available profiles
+/guard profile <name>    # Activate a profile by name
+/guard profile off       # Deactivate current profile
+```
+
+### Shortcuts
+
+Shortcuts are custom commands that execute guard subcommands, so you don't have to type `/guard profile read-write` every time:
 
 ```json
 {
@@ -172,31 +201,6 @@ The default state is "read-only" — edit and write tools require approval. Defi
     },
     "shortcuts": {
       "rw": "profile read-write",
-      "ro": "profile off"
-    }
-  }
-}
-```
-
-Now `/rw` activates the read-write profile, and `/ro` deactivates it (returning to read-only defaults).
-
-### Profile Commands
-
-```
-/guard profile           # Show active profile and available profiles
-/guard profile <name>    # Activate a profile by name
-/guard profile off       # Deactivate current profile
-```
-
-### Shortcuts
-
-Shortcuts are custom commands that execute guard subcommands. Define them in config:
-
-```json
-{
-  "guard": {
-    "shortcuts": {
-      "rw": "profile read-write",
       "ro": "profile off",
       "rules": "list",
       "toggle": "toggle"
@@ -205,7 +209,9 @@ Shortcuts are custom commands that execute guard subcommands. Define them in con
 }
 ```
 
-Shortcuts can reference any guard subcommand: `profile`, `list`, or `toggle`.## Commands
+Now `/rw` activates the read-write profile and `/ro` deactivates it. Shortcuts can reference any guard subcommand: `profile`, `list`, or `toggle`.
+
+## Commands
 
 ### `/guard`
 
