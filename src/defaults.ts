@@ -1,6 +1,6 @@
 import type { GuardConfig } from "./types.ts";
 
-export const DEFAULT_CONFIG: GuardConfig = {
+export const DEFAULT_CONFIG = {
   enabled: true,
   matchers: {
     bash: { param: "command", type: "bash" },
@@ -94,4 +94,4 @@ export const DEFAULT_CONFIG: GuardConfig = {
       "*": "allow",
     },
   },
-};
+} as const satisfies GuardConfig;

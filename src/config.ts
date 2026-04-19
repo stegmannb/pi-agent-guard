@@ -9,7 +9,7 @@ const SETTINGS_PATH = path.join(AGENT_DIR, "settings.json");
 
 const SAFE_FALLBACK_CONFIG: GuardConfig = {
   enabled: true,
-  ...(DEFAULT_CONFIG.matchers ? { matchers: DEFAULT_CONFIG.matchers } : {}),
+  matchers: DEFAULT_CONFIG.matchers,
   rules: {},
 };
 
@@ -110,7 +110,7 @@ export function validateLoadedGuardConfig(input: unknown): LoadedConfigResult {
     warnings.push("enabled must be a boolean");
   }
 
-  let matchers: Matchers = DEFAULT_CONFIG.matchers!;
+  let matchers: Matchers = DEFAULT_CONFIG.matchers;
   if (cfg.matchers !== undefined) {
     if (cfg.matchers && typeof cfg.matchers === "object" && !Array.isArray(cfg.matchers)) {
       const validMatchers: Matchers = {};

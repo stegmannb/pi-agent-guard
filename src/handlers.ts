@@ -64,18 +64,12 @@ export async function handleBashTool(
   const allCommands = extractAllCommandsFromAST(ast, rawCmd);
   if (allCommands.length === 0) return;
 
-  // Merge session rules with config rules
-  const mergedRules: Record<string, Action> = { ...toolRules };
-  if (sessionRules[tool]) {
-    Object.assign(mergedRules, sessionRules[tool]);
-  }
-
   const unauthorizedCommands: CommandRef[] = [];
 
   for (const cmd of allCommands) {
     const name = getCommandName(cmd);
     const args = getCommandArgs(cmd);
-    const action = resolveBashAction(name, args, mergedRules);
+    const action = resolveBashAction(name, args, toolRules);
     if (action !== "allow") {
       unauthorizedCommands.push(cmd);
     }
@@ -88,7 +82,7 @@ export async function handleBashTool(
     const firstCmd = unauthorizedCommands[0]!;
     const name = getCommandName(firstCmd);
     const args = getCommandArgs(firstCmd);
-    const action = resolveBashAction(name, args, mergedRules);
+    const action = resolveBashAction(name, args, toolRules);
 
     if (action === "deny") {
       return {
@@ -126,15 +120,13 @@ export async function handleBashTool(
   }
 }
 
-/** Shared approval flow for rule-based tool handlers (glob, exact). */
 async function handleToolApproval(
   pi: ExtensionAPI,
   tool: string,
-  displayValue: string,
   action: Action | undefined,
   ctx: ExtensionContext,
   sessionRules: Record<string, Record<string, Action>>,
-  buildPrompt: (tool: string, value: string) => string,
+  prompt: string,
 ): Promise<{ block: true; reason: string } | void> {
   if (action === "allow") return;
   if (action === "deny") {
@@ -143,7 +135,6 @@ async function handleToolApproval(
   if (!ctx.hasUI) {
     return { block: true, reason: "[Blocked by pi-guard: No interactive session available]" };
   }
-  const prompt = buildPrompt(tool, displayValue);
   const alwaysLabel = `Always allow ${tool} (this session)`;
   pi.events.emit("nudge", { body: `${tool} needs approval` });
   const choice = await ctx.ui.select(prompt, ["Allow", alwaysLabel, "Reject"]);
@@ -164,9 +155,7 @@ export async function handleGlobTool(
   ctx: ExtensionContext,
   sessionRules: Record<string, Record<string, Action>>,
 ): Promise<{ block: true; reason: string } | void> {
-  const mergedRules: Record<string, Action> = { ...toolRules };
-  if (sessionRules[tool]) Object.assign(mergedRules, sessionRules[tool]);
-  return handleToolApproval(pi, tool, path, resolveGlobAction(path, mergedRules), ctx, sessionRules, buildFileApprovalPrompt);
+  return handleToolApproval(pi, tool, resolveGlobAction(path, toolRules), ctx, sessionRules, buildFileApprovalPrompt(tool, path));
 }
 
 export async function handleExactTool(
@@ -177,7 +166,5 @@ export async function handleExactTool(
   ctx: ExtensionContext,
   sessionRules: Record<string, Record<string, Action>>,
 ): Promise<{ block: true; reason: string } | void> {
-  const mergedRules: Record<string, Action> = { ...toolRules };
-  if (sessionRules[tool]) Object.assign(mergedRules, sessionRules[tool]);
-  return handleToolApproval(pi, tool, value, resolveExactAction(value, mergedRules), ctx, sessionRules, buildCustomApprovalPrompt);
+  return handleToolApproval(pi, tool, resolveExactAction(value, toolRules), ctx, sessionRules, buildCustomApprovalPrompt(tool, value));
 }
