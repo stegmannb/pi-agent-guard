@@ -1,9 +1,9 @@
 import {
   saveConfig,
   loadProjectConfig,
-  buildEffectiveRules,
+  DEFAULT_CONFIG,
 } from "./config.ts";
-import type { Action, GuardConfig } from "./types.ts";
+import type { Action, GuardConfig, Rules } from "./types.ts";
 
 export interface GuardContext {
   config: GuardConfig;
@@ -76,43 +76,74 @@ function handleDisableCommand(context: GuardContext): string {
   return "pi-guard is now DISABLED";
 }
 
+function formatLayer(label: string, rules: Rules | undefined, emptyMessage = "(no rules)"): string {
+  if (!rules) {
+    return `${label}:\n  ${emptyMessage}\n\n`;
+  }
+
+  if (typeof rules === "string") {
+    return `${label}:\n  ${rules}\n\n`;
+  }
+
+  const entries = Object.entries(rules);
+  if (entries.length === 0) {
+    return `${label}:\n  ${emptyMessage}\n\n`;
+  }
+
+  let output = `${label}:\n`;
+  for (const [tool, toolRules] of entries) {
+    if (typeof toolRules === "string") {
+      output += `  ${tool}: ${toolRules}\n`;
+    } else {
+      output += `  ${tool}:\n`;
+      for (const [pattern, action] of Object.entries(toolRules)) {
+        output += `    ${pattern}: ${action}\n`;
+      }
+    }
+  }
+  return output + "\n";
+}
+
 function buildListOutput(context: GuardContext, cwd: string): string {
   const enabled = context.config.enabled ? "ENABLED" : "DISABLED";
-  const profiles = context.config.profiles ?? {};
-
-  const projectResult = loadProjectConfig(cwd);
-  const projectRules = projectResult?.config.rules ?? {};
-  const envRules = process.env.PI_GUARD ? JSON.parse(process.env.PI_GUARD) : undefined;
-  const profileRules = context.activeProfile ? profiles[context.activeProfile] : undefined;
-  const effectiveRules = buildEffectiveRules(
-    context.config.rules,
-    projectRules,
-    envRules,
-    profileRules,
-    context.sessionRules,
-  );
-
   let output = `pi-guard: ${enabled}\n`;
   if (context.activeProfile) {
     output += `Profile: ${context.activeProfile}\n`;
   }
   output += "\n";
 
-  if (typeof effectiveRules === "string") {
-    output += `Global rule: ${effectiveRules}\n`;
-  } else {
-    for (const [tool, rules] of Object.entries(effectiveRules)) {
-      output += `${tool}:\n`;
-      if (typeof rules === "string") {
-        output += `  ${rules}\n`;
-      } else {
-        for (const [pattern, action] of Object.entries(rules)) {
-          output += `  ${pattern}: ${action}\n`;
-        }
-      }
-      output += "\n";
+  // Load project config
+  const projectResult = loadProjectConfig(cwd);
+  const projectRules = projectResult?.config.rules ?? {};
+
+  // Parse env rules
+  let envRules: Rules | undefined;
+  if (process.env.PI_GUARD) {
+    try {
+      envRules = JSON.parse(process.env.PI_GUARD);
+    } catch {
+      // Invalid JSON in env var
     }
   }
+
+  // Get profile rules
+  const profiles = context.config.profiles ?? {};
+  const profileRules = context.activeProfile ? profiles[context.activeProfile] : undefined;
+
+  // Show layers in precedence order: default → user → project → env → profile → session
+  output += formatLayer("default", DEFAULT_CONFIG.rules);
+  output += formatLayer("user", context.config.rules);
+  output += formatLayer("project", projectRules, projectResult ? undefined : "(no .pi/settings.json)");
+  output += formatLayer("environment", envRules, process.env.PI_GUARD ? "(invalid)" : "(not set)");
+
+  if (context.activeProfile) {
+    output += formatLayer(`profile (${context.activeProfile})`, profileRules);
+  }
+
+  const sessionRules = Object.keys(context.sessionRules).length > 0
+    ? (context.sessionRules as unknown as Rules)
+    : undefined;
+  output += formatLayer("session", sessionRules as Rules | undefined);
 
   return output;
 }

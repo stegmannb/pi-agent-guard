@@ -9,6 +9,7 @@ const SETTINGS_PATH = path.join(AGENT_DIR, "settings.json");
 
 const SAFE_FALLBACK_CONFIG: GuardConfig = {
   enabled: true,
+  ...(DEFAULT_CONFIG.matchers ? { matchers: DEFAULT_CONFIG.matchers } : {}),
   rules: {},
 };
 
@@ -231,13 +232,13 @@ export function validateLoadedGuardConfig(input: unknown): LoadedConfigResult {
 
 export function getGuardConfigFromSettings(input: unknown): LoadedConfigResult {
   if (!input || typeof input !== "object") {
-    return { config: DEFAULT_CONFIG };
+    return { config: { enabled: true, ...(DEFAULT_CONFIG.matchers ? { matchers: DEFAULT_CONFIG.matchers } : {}), rules: {} } };
   }
 
   const settings = input as Record<string, unknown>;
 
   if (!Object.hasOwn(settings, "guard")) {
-    return { config: DEFAULT_CONFIG };
+    return validateLoadedGuardConfig({});
   }
 
   return validateLoadedGuardConfig(settings.guard);
@@ -286,7 +287,7 @@ export function loadConfig(): LoadedConfigResult & { envRules: Rules | undefined
   }
 
   return {
-    config: { ...DEFAULT_CONFIG },
+    config: { enabled: true, ...(DEFAULT_CONFIG.matchers ? { matchers: DEFAULT_CONFIG.matchers } : {}), rules: {} },
     envRules,
   };
 }

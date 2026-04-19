@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- `/guard list` now shows rules organized by provenance layer (default → user → project → environment → profile → session) instead of merged effective rules.
 - Rule precedence corrected: `default → user → project → env → profile → session`. Session rules now correctly override env (`PI_GUARD`).
 - Configuration (user, project, env) is now loaded once at extension startup instead of on every tool call, improving performance.
 
