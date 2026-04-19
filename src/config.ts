@@ -232,13 +232,13 @@ export function validateLoadedGuardConfig(input: unknown): LoadedConfigResult {
 
 export function getGuardConfigFromSettings(input: unknown): LoadedConfigResult {
   if (!input || typeof input !== "object") {
-    return { config: { enabled: true, ...(DEFAULT_CONFIG.matchers ? { matchers: DEFAULT_CONFIG.matchers } : {}), rules: {} } };
+    return { config: { ...SAFE_FALLBACK_CONFIG } };
   }
 
   const settings = input as Record<string, unknown>;
 
   if (!Object.hasOwn(settings, "guard")) {
-    return validateLoadedGuardConfig({});
+    return { config: { ...SAFE_FALLBACK_CONFIG } };
   }
 
   return validateLoadedGuardConfig(settings.guard);
@@ -286,10 +286,7 @@ export function loadConfig(): LoadedConfigResult & { envRules: Rules | undefined
     }
   }
 
-  return {
-    config: { enabled: true, ...(DEFAULT_CONFIG.matchers ? { matchers: DEFAULT_CONFIG.matchers } : {}), rules: {} },
-    envRules,
-  };
+  return { config: { ...SAFE_FALLBACK_CONFIG }, envRules };
 }
 
 export function saveConfig(config: GuardConfig) {

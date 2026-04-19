@@ -91,29 +91,25 @@ export default function (pi: ExtensionAPI) {
     // - object effectiveRules → look up tool, undefined means "ask"
     const toolRules = typeof effectiveRules === "object" ? effectiveRules[tool] : effectiveRules;
 
+    let action: Action = "ask";
     if (typeof toolRules !== "object") {
-      const action: Action = toolRules ?? "ask";
-      if (action === "allow") return;
-      if (action === "deny") return block("Security policy");
-      if (!ctx.hasUI) return block("No interactive session available");
-      return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
+      action = toolRules ?? "ask";
+    } else {
+      const matcher = (context.config.matchers ?? {})[tool];
+      if (matcher) {
+        const value = input[matcher.param];
+        if (typeof value !== "string" || value.trim() === "") return;
+        if (matcher.type === "bash") return handleBashTool(pi, tool, value, toolRules, ctx, context.sessionRules);
+        if (matcher.type === "glob") return handleGlobTool(pi, tool, value, toolRules, ctx, context.sessionRules);
+        if (matcher.type === "exact") return handleExactTool(pi, tool, value, toolRules, ctx, context.sessionRules);
+      } else {
+        action = toolRules["*"] ?? "ask";
+      }
     }
 
-    const matcher = (context.config.matchers ?? {})[tool];
-
-    if (!matcher) {
-      const action: Action = toolRules["*"] ?? "ask";
-      if (action === "allow") return;
-      if (action === "deny") return block("Security policy");
-      if (!ctx.hasUI) return block("No interactive session available");
-      return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
-    }
-
-    const value = input[matcher.param];
-    if (typeof value !== "string" || value.trim() === "") return;
-
-    if (matcher.type === "bash") return handleBashTool(pi, tool, value, toolRules, ctx, context.sessionRules);
-    if (matcher.type === "glob") return handleGlobTool(pi, tool, value, toolRules, ctx, context.sessionRules);
-    if (matcher.type === "exact") return handleExactTool(pi, tool, value, toolRules, ctx, context.sessionRules);
+    if (action === "allow") return;
+    if (action === "deny") return block("Security policy");
+    if (!ctx.hasUI) return block("No interactive session available");
+    return handleInteractiveApproval(pi, tool, input, ctx, context.sessionRules);
   });
 }

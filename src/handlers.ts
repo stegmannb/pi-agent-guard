@@ -126,6 +126,36 @@ export async function handleBashTool(
   }
 }
 
+/** Shared approval flow for rule-based tool handlers (glob, exact). */
+async function handleToolApproval(
+  pi: ExtensionAPI,
+  tool: string,
+  displayValue: string,
+  action: Action | undefined,
+  ctx: ExtensionContext,
+  sessionRules: Record<string, Record<string, Action>>,
+  buildPrompt: (tool: string, value: string) => string,
+): Promise<{ block: true; reason: string } | void> {
+  if (action === "allow") return;
+  if (action === "deny") {
+    return { block: true, reason: "[Blocked by pi-guard: Security policy]" };
+  }
+  if (!ctx.hasUI) {
+    return { block: true, reason: "[Blocked by pi-guard: No interactive session available]" };
+  }
+  const prompt = buildPrompt(tool, displayValue);
+  const alwaysLabel = `Always allow ${tool} (this session)`;
+  pi.events.emit("nudge", { body: `${tool} needs approval` });
+  const choice = await ctx.ui.select(prompt, ["Allow", alwaysLabel, "Reject"]);
+  if (choice === alwaysLabel) {
+    sessionRules[tool] = { ...sessionRules[tool], "*": "allow" };
+    return;
+  }
+  if (choice !== "Allow") {
+    return { block: true, reason: "[Blocked by pi-guard: User rejected this invocation]" };
+  }
+}
+
 export async function handleGlobTool(
   pi: ExtensionAPI,
   tool: string,
@@ -134,45 +164,9 @@ export async function handleGlobTool(
   ctx: ExtensionContext,
   sessionRules: Record<string, Record<string, Action>>,
 ): Promise<{ block: true; reason: string } | void> {
-  // Merge session rules with config rules
   const mergedRules: Record<string, Action> = { ...toolRules };
-  if (sessionRules[tool]) {
-    Object.assign(mergedRules, sessionRules[tool]);
-  }
-
-  const action = resolveGlobAction(path, mergedRules);
-
-  if (action === "allow") return;
-
-  if (action === "deny") {
-    return {
-      block: true,
-      reason: `[Blocked by pi-guard: Security policy]`,
-    };
-  }
-
-  if (!ctx.hasUI) {
-    return {
-      block: true,
-      reason: `[Blocked by pi-guard: No interactive session available]`,
-    };
-  }
-
-  // Interactive: prompt user
-  const prompt = buildFileApprovalPrompt(tool, path);
-  const alwaysLabel = `Always allow ${tool} (this session)`;
-
-  pi.events.emit("nudge", { body: `${tool} needs approval` });
-  const choice = await ctx.ui.select(prompt, ["Allow", alwaysLabel, "Reject"]);
-
-  if (choice === alwaysLabel) {
-    sessionRules[tool] = { ...sessionRules[tool], "*": "allow" };
-    return;
-  }
-
-  if (choice !== "Allow") {
-    return { block: true, reason: `[Blocked by pi-guard: User rejected this invocation]` };
-  }
+  if (sessionRules[tool]) Object.assign(mergedRules, sessionRules[tool]);
+  return handleToolApproval(pi, tool, path, resolveGlobAction(path, mergedRules), ctx, sessionRules, buildFileApprovalPrompt);
 }
 
 export async function handleExactTool(
@@ -183,43 +177,7 @@ export async function handleExactTool(
   ctx: ExtensionContext,
   sessionRules: Record<string, Record<string, Action>>,
 ): Promise<{ block: true; reason: string } | void> {
-  // Merge session rules with config rules
   const mergedRules: Record<string, Action> = { ...toolRules };
-  if (sessionRules[tool]) {
-    Object.assign(mergedRules, sessionRules[tool]);
-  }
-
-  const action = resolveExactAction(value, mergedRules);
-
-  if (action === "allow") return;
-
-  if (action === "deny") {
-    return {
-      block: true,
-      reason: `[Blocked by pi-guard: Security policy]`,
-    };
-  }
-
-  if (!ctx.hasUI) {
-    return {
-      block: true,
-      reason: `[Blocked by pi-guard: No interactive session available]`,
-    };
-  }
-
-  // Interactive: prompt user
-  const prompt = buildCustomApprovalPrompt(tool, value);
-  const alwaysLabel = `Always allow ${tool} (this session)`;
-
-  pi.events.emit("nudge", { body: `${tool} needs approval` });
-  const choice = await ctx.ui.select(prompt, ["Allow", alwaysLabel, "Reject"]);
-
-  if (choice === alwaysLabel) {
-    sessionRules[tool] = { ...sessionRules[tool], "*": "allow" };
-    return;
-  }
-
-  if (choice !== "Allow") {
-    return { block: true, reason: `[Blocked by pi-guard: User rejected this invocation]` };
-  }
+  if (sessionRules[tool]) Object.assign(mergedRules, sessionRules[tool]);
+  return handleToolApproval(pi, tool, value, resolveExactAction(value, mergedRules), ctx, sessionRules, buildCustomApprovalPrompt);
 }
