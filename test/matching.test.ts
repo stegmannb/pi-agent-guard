@@ -15,7 +15,9 @@ function _cmd(name: string, args: string[]) {
 	const raw = [name, ...args].join(" ");
 	const commands = extractAllCommandsFromAST(parseBash(raw), raw);
 	return {
+		// biome-ignore lint/style/noNonNullAssertion: test helper, known to produce at least one command
 		name: getCommandName(commands[0]!),
+		// biome-ignore lint/style/noNonNullAssertion: test helper, known to produce at least one command
 		args: getCommandArgs(commands[0]!),
 	};
 }

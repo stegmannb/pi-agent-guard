@@ -107,6 +107,7 @@ export async function handleBashTool(
 
 	if (!ctx.hasUI) {
 		// Non-interactive: check first unauthorized command's action
+		// biome-ignore lint/style/noNonNullAssertion: guarded by length check above
 		const firstCmd = unauthorizedCommands[0]!;
 		const name = getCommandName(firstCmd);
 		const args = getCommandArgs(firstCmd);
@@ -140,6 +141,7 @@ export async function handleBashTool(
 	if (choice === alwaysLabel) {
 		sessionRules[tool] = sessionRules[tool] ?? {};
 		for (const name of uniqueBaseNames) {
+			// biome-ignore lint/style/noNonNullAssertion: initialized on line above
 			sessionRules[tool]![name] = "allow";
 		}
 		return;

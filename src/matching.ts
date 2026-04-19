@@ -62,9 +62,7 @@ export function resolveBashAction(
 			continue;
 		}
 
-		const tokens = pattern.split(" ");
-		const patternName = tokens[0]!;
-		const patternArgs = tokens.slice(1);
+		const [patternName, ...patternArgs] = pattern.split(" ");
 
 		if (patternName !== commandName) continue;
 

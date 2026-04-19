@@ -6,6 +6,7 @@ import { formatCommand } from "../src/format.ts";
 
 test("formatCommand", async (t) => {
 	function first(raw: string) {
+		// biome-ignore lint/style/noNonNullAssertion: test helper, caller guarantees input parses
 		return extractAllCommandsFromAST(parseBash(raw), raw)[0]!;
 	}
 

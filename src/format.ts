@@ -51,7 +51,9 @@ export function formatCommand(
 	let overflow = fullDisplay.length - maxLength;
 
 	for (let i = tokenSpecs.length - 1; i >= 0 && overflow > 0; i--) {
+		// biome-ignore lint/style/noNonNullAssertion: i is in bounds by loop guard
 		const spec = tokenSpecs[i]!;
+		// biome-ignore lint/style/noNonNullAssertion: i is in bounds by loop guard
 		const current = tokens[i]!;
 		const maxShrink = current.length - spec.min.length;
 		if (maxShrink <= 0) continue;
