@@ -1,4 +1,4 @@
-import { formatCommand } from "./format.ts";
+import { formatCommand, truncate } from "./format.ts";
 import type { CommandRef } from "./types.ts";
 
 export interface ApprovalPromptOptions {
@@ -27,9 +27,7 @@ export function buildFileApprovalPrompt(
 	options?: { maxLength?: number },
 ): string {
 	const maxLength = options?.maxLength ?? 120;
-	const displayPath =
-		path.length > maxLength ? `${path.slice(0, maxLength - 1)}…` : path;
-	return `⚠️ ${tool.charAt(0).toUpperCase() + tool.slice(1)} Permission Required\n\n${displayPath}`;
+	return `⚠️ ${tool.charAt(0).toUpperCase() + tool.slice(1)} Permission Required\n\n${truncate(path, maxLength)}`;
 }
 
 /** Build prompt for custom tools with exact matchers. */
@@ -39,7 +37,5 @@ export function buildCustomApprovalPrompt(
 	options?: { maxLength?: number },
 ): string {
 	const maxLength = options?.maxLength ?? 120;
-	const display =
-		input.length > maxLength ? `${input.slice(0, maxLength - 1)}…` : input;
-	return `⚠️ ${tool} Permission Required\n\n${display}`;
+	return `⚠️ ${tool} Permission Required\n\n${truncate(input, maxLength)}`;
 }

@@ -4,6 +4,10 @@ import type { CommandRef } from "./types.ts";
 export const FORMAT_COMMAND_DEFAULT_MAX_LENGTH = 120;
 export const FORMAT_COMMAND_DEFAULT_ARG_MAX_LENGTH = 40;
 
+export function truncate(s: string, maxLength: number): string {
+	return s.length > maxLength ? `${s.slice(0, maxLength - 1)}…` : s;
+}
+
 /**
  * Format an extracted command for display.
  *
@@ -31,16 +35,14 @@ export function formatCommand(
 			const full = displayWord(arg, cmd.source).replace(/\n/g, "↵");
 			return makeTokenSpec(full, argMaxLength);
 		}),
-		...cmd.node.redirects
-			.filter((redirect) => !isRenderableHeredoc(redirect))
-			.map((redirect) => {
-				const full = renderRedirect(redirect, cmd.source).replace(/\n/g, "↵");
-				return makeTokenSpec(full, argMaxLength);
-			}),
-		...cmd.node.redirects.filter(isRenderableHeredoc).map((redirect) => {
-			const full = renderFullHeredoc(redirect, cmd.source);
-			const min = renderElidedHeredoc(redirect, cmd.source, argMaxLength);
-			return makeTokenSpec(full, argMaxLength, min);
+		...cmd.node.redirects.map((redirect) => {
+			if (isRenderableHeredoc(redirect)) {
+				const full = renderFullHeredoc(redirect, cmd.source);
+				const min = renderElidedHeredoc(redirect, cmd.source, argMaxLength);
+				return makeTokenSpec(full, argMaxLength, min);
+			}
+			const full = renderRedirect(redirect, cmd.source).replace(/\n/g, "↵");
+			return makeTokenSpec(full, argMaxLength);
 		}),
 	];
 
@@ -64,12 +66,7 @@ export function formatCommand(
 		overflow -= current.length - shrunk.length;
 	}
 
-	let display = [name, ...tokens].join(" ");
-	if (display.length > maxLength) {
-		display = `${display.slice(0, maxLength - 1)}…`;
-	}
-
-	return display;
+	return truncate([name, ...tokens].join(" "), maxLength);
 }
 
 function isRenderableHeredoc(redirect: Redirect): boolean {
@@ -85,9 +82,12 @@ function renderRedirect(redirect: Redirect, source: string): string {
 	return `${prefix}${target}`;
 }
 
+function heredocPrefix(redirect: Redirect, source: string): string {
+	return `${redirectPrefix(redirect)}${heredocTargetDisplay(redirect, source)}↵`;
+}
+
 function renderFullHeredoc(redirect: Redirect, source: string): string {
-	const prefix = `${redirectPrefix(redirect)}${heredocTargetDisplay(redirect, source)}↵`;
-	return `${prefix}${(redirect.content ?? "").replace(/\n/g, "↵")}${heredocMarker(redirect, source)}`;
+	return `${heredocPrefix(redirect, source)}${(redirect.content ?? "").replace(/\n/g, "↵")}${heredocMarker(redirect, source)}`;
 }
 
 function renderElidedHeredoc(
@@ -95,7 +95,7 @@ function renderElidedHeredoc(
 	source: string,
 	argMaxLength: number,
 ): string {
-	const prefix = `${redirectPrefix(redirect)}${heredocTargetDisplay(redirect, source)}↵`;
+	const prefix = heredocPrefix(redirect, source);
 	const content = (redirect.content ?? "").replace(/\n/g, "↵");
 	const full = content + heredocMarker(redirect, source);
 
@@ -140,7 +140,7 @@ function makeTokenSpec(
 	full: string,
 	argMaxLength: number,
 	min = elideToken(full, argMaxLength),
-) {
+): { full: string; min: string; shrink: (targetLength: number) => string } {
 	return {
 		full,
 		min,
@@ -148,7 +148,6 @@ function makeTokenSpec(
 	};
 }
 
-/** Elide a single argument token if warranted. */
 function elideToken(token: string, argMaxLength: number): string {
 	if (isPathToken(token)) {
 		const elided = elidePath(token);
@@ -165,7 +164,7 @@ function shrinkToken(token: string, targetLength: number, min: string): string {
 	if (targetLength <= min.length) return min;
 	if (targetLength <= 1) return "…";
 	if (isPathToken(token)) return shrinkPathToken(token, targetLength);
-	return `${token.slice(0, targetLength - 1)}…`;
+	return truncate(token, targetLength);
 }
 
 /**
@@ -205,13 +204,13 @@ function elidePath(p: string): string {
 function shrinkPathToken(token: string, targetLength: number): string {
 	const lastSlash = token.lastIndexOf("/");
 	if (lastSlash <= 0) {
-		return `${token.slice(0, targetLength - 1)}…`;
+		return truncate(token, targetLength);
 	}
 
 	const suffix = token.slice(lastSlash);
 	const prefixBudget = targetLength - suffix.length - 1;
 	if (prefixBudget <= 0) {
-		return `${token.slice(0, targetLength - 1)}…`;
+		return truncate(token, targetLength);
 	}
 
 	return `${token.slice(0, prefixBudget)}…${suffix}`;
