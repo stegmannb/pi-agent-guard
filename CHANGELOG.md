@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- `globMatch` now matches dot files (e.g., `*.env` matches `.env`) thanks to @tdiam
+
+### Changed
+
+- Default rules for `read` now use `**/*.env` and `**/*.pem` to deny access in nested directories too, thanks to @tdiam
+
 ## [1.2.0] - 2026-04-19
 
 ### Added
