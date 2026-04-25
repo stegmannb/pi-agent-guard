@@ -38,8 +38,8 @@ Configure in `~/.pi/agent/settings.json`:
       },
       "read": {
         "*": "allow",
-        "*.env": "deny",
-        "*.pem": "deny"
+        "**/*.env": "deny",
+        "**/*.pem": "deny"
       },
       "write": { "*": "ask" },
       "edit": { "*": "ask" },

@@ -75,8 +75,8 @@ export const DEFAULT_CONFIG = {
 		},
 		read: {
 			"*": "allow",
-			"*.env": "deny",
-			"*.pem": "deny",
+			"**/*.env": "deny",
+			"**/*.pem": "deny",
 		},
 		write: {
 			"*": "ask",
