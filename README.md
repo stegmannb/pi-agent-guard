@@ -101,6 +101,25 @@ Tools without a matcher get simple allow/ask/deny for the whole tool.
 
 Example: `"git log"` matches `git log`, `git log --oneline`, `git log --oneline -10`
 
+#### Wildcard tokens
+
+Tokens in a rule that contain `*` or `?` are matched as globs against the corresponding command argument, not as exact strings. This lets you match flag variants:
+
+```json
+"sed": "allow",
+"sed -i*": "ask",
+"sed --in-place*": "ask"
+```
+
+| Command | Matches | Reason |
+|---------|---------|--------|
+| `sed -E 's/old/new/'` | `allow` | `sed` rule, no `-i` flag |
+| `sed -i 's/old/new/'` | `ask` | `-i` matches glob `-i*` |
+| `sed -i.bak 's/old/new/'` | `ask` | `-i.bak` matches glob `-i*` |
+| `sed --in-place 's/old/new/'` | `ask` | `--in-place` matches glob `--in-place*` |
+
+This is only for `*`/`?` **inside** rule tokens. The bare `"*"` key is a catch-all for any command (see Rule Precedence).
+
 #### Wrapper commands
 
 Commands like `xargs`, `sudo`, `bash -c`, `find -exec`, and `fd -x` embed sub-commands. pi-guard extracts and independently checks those sub-commands against rules. Nested wrappers are handled too — `sudo xargs rm` checks `rm` through both `sudo` and `xargs`.
@@ -152,7 +171,7 @@ Each permission rule resolves to one of:
 
 See [src/defaults.ts](src/defaults.ts) for the built-in default rules.
 
-The defaults follow a simple principle: **reading is safe, writing is dangerous**. Bash commands that only read (ls, cat, git log) are allowed, while anything that modifies state asks for approval. File reads are mostly allowed except for sensitive patterns (*.env, *.pem). All edits and writes require approval since they change the codebase.
+The defaults follow a simple principle: **reading is safe, writing is dangerous**. Bash commands that only read (ls, cat, git log) are allowed, while anything that modifies state asks for approval. Note that `sed` is allowed by default, but `sed -i*` (in-place edit) is set to `ask` since it modifies files. File reads are mostly allowed except for sensitive patterns (*.env, *.pem). All edits and writes require approval since they change the codebase.
 
 To trust the agent with file modifications (useful in containers or trusted environments), allow all edits and writes:
 
