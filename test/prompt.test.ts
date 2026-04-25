@@ -35,7 +35,7 @@ test("buildApprovalPrompt", async (t) => {
 				[
 					"⚠️ Unapproved Commands",
 					"",
-					"✔ cd /Users/jdiamond/code/pi-nudge",
+					"✔ cd /Users/jdiamond/code/pi-nudge &&",
 					"✖ npx tsc --noEmit 2>&1",
 				].join("\n"),
 			);
@@ -60,13 +60,106 @@ test("buildApprovalPrompt", async (t) => {
 				[
 					"⚠️ Unapproved Commands",
 					"",
-					"✔ echo ok",
-					"✖ npm test",
+					"✔ echo ok &&",
+					"✖ npm test &&",
 					"✖ npm test",
 				].join("\n"),
 			);
 		},
 	);
+
+	await t.test("shows pipe joiners", () => {
+		const commands = extract("cat foo | grep bar | wc -l");
+		const unauthorized = commands.filter((cmd) => {
+			const name = getCommandName(cmd);
+			const args = getCommandArgs(cmd);
+			return resolveBashAction(name, args, { cat: "allow" }) !== "allow";
+		});
+
+		assert.equal(
+			buildApprovalPrompt(commands, unauthorized),
+			[
+				"⚠️ Unapproved Commands",
+				"",
+				"✔ cat foo |",
+				"✖ grep bar |",
+				"✖ wc -l",
+			].join("\n"),
+		);
+	});
+
+	await t.test("shows || joiners", () => {
+		const commands = extract("git commit || echo fail");
+		const unauthorized = commands.filter((cmd) => {
+			const name = getCommandName(cmd);
+			const args = getCommandArgs(cmd);
+			return resolveBashAction(name, args, {}) !== "allow";
+		});
+
+		assert.equal(
+			buildApprovalPrompt(commands, unauthorized),
+			["⚠️ Unapproved Commands", "", "✖ git commit ||", "✖ echo fail"].join(
+				"\n",
+			),
+		);
+	});
+
+	await t.test("shows ; joiners for sequential commands", () => {
+		const commands = extract("cd foo; rm bar");
+		const unauthorized = commands.filter((cmd) => {
+			const name = getCommandName(cmd);
+			const args = getCommandArgs(cmd);
+			return resolveBashAction(name, args, { cd: "allow" }) !== "allow";
+		});
+
+		assert.equal(
+			buildApprovalPrompt(commands, unauthorized),
+			["⚠️ Unapproved Commands", "", "✔ cd foo ;", "✖ rm bar"].join("\n"),
+		);
+	});
+
+	await t.test("separates groups with blank lines", () => {
+		// echo $(sort out) — echo and sort should be in different groups
+		const commands = extract("echo $(sort out)");
+		const unauthorized = commands.filter((cmd) => {
+			const _name = getCommandName(cmd);
+			const _args = getCommandArgs(cmd);
+			return true; // all unauthorized for simplicity
+		});
+
+		assert.equal(
+			buildApprovalPrompt(commands, unauthorized),
+			[
+				"⚠️ Unapproved Commands",
+				"",
+				"✖ echo $(sort out)",
+				"",
+				"✖ sort out",
+			].join("\n"),
+		);
+	});
+
+	await t.test("shows joiners inside subshell", () => {
+		// echo $(cat foo | grep bar) — pipe inside subshell
+		const commands = extract("echo $(cat foo | grep bar)");
+		const unauthorized = commands.filter((cmd) => {
+			const _name = getCommandName(cmd);
+			const _args = getCommandArgs(cmd);
+			return true;
+		});
+
+		assert.equal(
+			buildApprovalPrompt(commands, unauthorized),
+			[
+				"⚠️ Unapproved Commands",
+				"",
+				"✖ echo $(cat foo | grep bar)",
+				"",
+				"✖ cat foo |",
+				"✖ grep bar",
+			].join("\n"),
+		);
+	});
 });
 
 test("buildFileApprovalPrompt", async (t) => {

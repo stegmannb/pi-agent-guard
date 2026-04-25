@@ -14,13 +14,24 @@ export function buildApprovalPrompt(
 	expandedWrappers?: Set<CommandRef>,
 ): string {
 	const unauthorizedSet = new Set(unauthorizedCommands);
-	const lines = allCommands.map((command) => {
+	const lines: string[] = [];
+
+	let prevGroup: number | undefined;
+
+	for (const command of allCommands) {
+		// Insert blank line between groups
+		if (prevGroup !== undefined && command.group !== prevGroup) {
+			lines.push("");
+		}
+		prevGroup = command.group;
+
 		const marker = unauthorizedSet.has(command) ? "✖" : "✔";
 		const display = expandedWrappers?.has(command)
 			? formatWrapperDisplay(command)
 			: formatCommand(command, options);
-		return `${marker} ${display}`;
-	});
+		const line = `${marker} ${display}`;
+		lines.push(command.joiner ? `${line} ${command.joiner}` : line);
+	}
 
 	return ["⚠️ Unapproved Commands", "", ...lines].join("\n");
 }

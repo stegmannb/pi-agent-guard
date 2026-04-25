@@ -1,5 +1,6 @@
 import { parse as parseBash } from "unbash";
-import { extractAllCommandsFromAST } from "./extract.ts";
+import type { ExtractCtx } from "./extract.ts";
+import { createExtractCtx, extractAllCommandsFromAST } from "./extract.ts";
 import { formatCommand } from "./format.ts";
 import { getCommandArgs, getCommandName } from "./resolve.ts";
 import type { CommandRef } from "./types.ts";
@@ -104,13 +105,20 @@ export type ExpansionResult = {
  */
 export function expandWrapperCommands(commands: CommandRef[]): ExpansionResult {
 	const expandedWrappers = new Set<CommandRef>();
-	const result = doExpand(commands, expandedWrappers);
+	// Start group IDs after the highest existing group
+	const maxGroupId = commands.reduce(
+		(max, cmd) => Math.max(max, cmd.group ?? 0),
+		-1,
+	);
+	const ctx: ExtractCtx = { nextGroupId: maxGroupId + 1 };
+	const result = doExpand(commands, expandedWrappers, ctx);
 	return { commands: result, expandedWrappers };
 }
 
 function doExpand(
 	commands: CommandRef[],
 	expandedWrappers: Set<CommandRef>,
+	ctx: ExtractCtx,
 ): CommandRef[] {
 	const result: CommandRef[] = [...commands];
 
@@ -119,10 +127,10 @@ function doExpand(
 		const spec = WRAPPER_COMMANDS[name];
 		if (!spec) continue;
 
-		const subCommands = extractSubCommands(cmd, spec);
+		const subCommands = extractSubCommands(cmd, spec, ctx);
 		if (subCommands.length > 0) {
 			expandedWrappers.add(cmd);
-			result.push(...doExpand(subCommands, expandedWrappers));
+			result.push(...doExpand(subCommands, expandedWrappers, ctx));
 		}
 	}
 
@@ -132,18 +140,23 @@ function doExpand(
 /**
  * Extract sub-commands from a wrapper command based on its spec.
  */
-function extractSubCommands(cmd: CommandRef, spec: WrapperSpec): CommandRef[] {
+function extractSubCommands(
+	cmd: CommandRef,
+	spec: WrapperSpec,
+	ctx: ExtractCtx,
+): CommandRef[] {
 	switch (spec.type) {
 		case "passthrough":
 			return extractPassthrough(
 				cmd,
 				spec.flagArgs,
 				spec.skipVarAssignments ?? false,
+				ctx,
 			);
 		case "flag":
-			return extractFlag(cmd, spec.flag, spec.flagArgs);
+			return extractFlag(cmd, spec.flag, spec.flagArgs, ctx);
 		case "exec":
-			return extractExec(cmd, spec.keywords, spec.terminators);
+			return extractExec(cmd, spec.keywords, spec.terminators, ctx);
 	}
 }
 
@@ -215,11 +228,12 @@ function extractPassthrough(
 	cmd: CommandRef,
 	flagArgs?: string[],
 	skipVarAssignments = false,
+	ctx?: ExtractCtx,
 ): CommandRef[] {
 	const args = getCommandArgs(cmd);
 	const i = scanPassthroughBoundary(args, flagArgs, skipVarAssignments);
 	if (i >= args.length) return [];
-	return parseSubCommandString(args.slice(i).join(" "));
+	return parseSubCommandString(args.slice(i).join(" "), ctx);
 }
 
 /**
@@ -232,6 +246,7 @@ function extractFlag(
 	cmd: CommandRef,
 	targetFlag: string,
 	flagArgs?: string[],
+	ctx?: ExtractCtx,
 ): CommandRef[] {
 	const args = getCommandArgs(cmd);
 
@@ -242,7 +257,7 @@ function extractFlag(
 		if (arg === targetFlag) {
 			const scriptArg = args[i + 1];
 			if (scriptArg) {
-				return parseSubCommandString(scriptArg);
+				return parseSubCommandString(scriptArg, ctx);
 			}
 			return [];
 		}
@@ -292,6 +307,7 @@ function extractExec(
 	cmd: CommandRef,
 	keywords: string[],
 	terminators: string[] | null,
+	ctx?: ExtractCtx,
 ): CommandRef[] {
 	const args = getCommandArgs(cmd);
 	const results: CommandRef[] = [];
@@ -314,7 +330,7 @@ function extractExec(
 				i++;
 			}
 			if (cmdParts.length > 0) {
-				results.push(...parseSubCommandString(cmdParts.join(" ")));
+				results.push(...parseSubCommandString(cmdParts.join(" "), ctx));
 			}
 			continue;
 		}
@@ -326,11 +342,12 @@ function extractExec(
 
 /**
  * Parse a command string and extract all top-level commands from it.
+ * Uses the provided context for group ID allocation, or creates a fresh one.
  */
-function parseSubCommandString(str: string): CommandRef[] {
+function parseSubCommandString(str: string, ctx?: ExtractCtx): CommandRef[] {
 	try {
 		const ast = parseBash(str);
-		return extractAllCommandsFromAST(ast, str);
+		return extractAllCommandsFromAST(ast, str, ctx ?? createExtractCtx());
 	} catch {
 		// If we can't parse the sub-command string, we can't check it.
 		// Return empty — the caller will still check the wrapper command

@@ -4,6 +4,12 @@ import type { Command } from "unbash";
 export interface CommandRef {
 	node: Command;
 	source: string;
+	/** Group ID: commands in the same group are connected by operators
+	 * and displayed together. Different groups are separated by blank lines. */
+	group: number;
+	/** The operator connecting this command to the next ("|", "&&", "||", or ";").
+	 * Undefined for the last command in a group. */
+	joiner?: "|" | "&&" | "||" | ";";
 }
 
 /** Matcher types define how to extract and match input from a tool call. */

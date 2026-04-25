@@ -177,3 +177,153 @@ test("extractAllCommandsFromAST", async (t) => {
 		},
 	);
 });
+
+test("extractAllCommandsFromAST — joiners", async (t) => {
+	function summarizeJoiners(raw: string) {
+		return extractAllCommandsFromAST(parseBash(raw), raw).map((cmd) => ({
+			name: getCommandName(cmd),
+			joiner: cmd.joiner,
+		}));
+	}
+
+	await t.test("no joiner on simple command", () => {
+		assert.deepEqual(summarizeJoiners("ls -la"), [
+			{ name: "ls", joiner: undefined },
+		]);
+	});
+
+	await t.test("assigns && joiner", () => {
+		assert.deepEqual(summarizeJoiners("git commit && git push"), [
+			{ name: "git", joiner: "&&" },
+			{ name: "git", joiner: undefined },
+		]);
+	});
+
+	await t.test("assigns || joiner", () => {
+		assert.deepEqual(summarizeJoiners("git commit || echo fail"), [
+			{ name: "git", joiner: "||" },
+			{ name: "echo", joiner: undefined },
+		]);
+	});
+
+	await t.test("assigns | joiner for pipeline", () => {
+		assert.deepEqual(summarizeJoiners("cat file.txt | grep foo | wc -l"), [
+			{ name: "cat", joiner: "|" },
+			{ name: "grep", joiner: "|" },
+			{ name: "wc", joiner: undefined },
+		]);
+	});
+
+	await t.test("assigns ; joiner for sequential commands", () => {
+		assert.deepEqual(summarizeJoiners("cd foo; rm bar"), [
+			{ name: "cd", joiner: ";" },
+			{ name: "rm", joiner: undefined },
+		]);
+	});
+
+	await t.test("assigns joiners for mixed pipeline and &&", () => {
+		// cat foo | grep bar && sort out
+		// Pipeline(cat, grep) with |, AndOr(pipeline, sort) with &&
+		// cat gets |, grep gets &&, sort gets nothing
+		assert.deepEqual(summarizeJoiners("cat foo | grep bar && sort out"), [
+			{ name: "cat", joiner: "|" },
+			{ name: "grep", joiner: "&&" },
+			{ name: "sort", joiner: undefined },
+		]);
+	});
+
+	await t.test("no joiners inside subshell expansion", () => {
+		// The outer echo has no joiner (it's standalone).
+		// The inner git has no joiner (it's standalone within the expansion).
+		// But they should be in different groups.
+		const cmds = extractAllCommandsFromAST(
+			parseBash("echo $(git status)"),
+			"echo $(git status)",
+		);
+		assert.deepEqual(
+			cmds.map((c) => ({ name: getCommandName(c), joiner: c.joiner })),
+			[
+				{ name: "echo", joiner: undefined },
+				{ name: "git", joiner: undefined },
+			],
+		);
+	});
+
+	await t.test("joiners inside subshell expansion", () => {
+		// echo $(cat foo | grep bar)
+		// Outer: echo (no joiner, group 0)
+		// Inner: cat (|), grep (no joiner, group 1)
+		const cmds = extractAllCommandsFromAST(
+			parseBash("echo $(cat foo | grep bar)"),
+			"echo $(cat foo | grep bar)",
+		);
+		assert.deepEqual(
+			cmds.map((c) => ({ name: getCommandName(c), joiner: c.joiner })),
+			[
+				{ name: "echo", joiner: undefined },
+				{ name: "cat", joiner: "|" },
+				{ name: "grep", joiner: undefined },
+			],
+		);
+	});
+});
+
+test("extractAllCommandsFromAST — groups", async (t) => {
+	function summarizeGroups(raw: string) {
+		return extractAllCommandsFromAST(parseBash(raw), raw).map((cmd) => ({
+			name: getCommandName(cmd),
+			group: cmd.group,
+		}));
+	}
+
+	await t.test("single command gets group 0", () => {
+		assert.deepEqual(summarizeGroups("ls -la"), [{ name: "ls", group: 0 }]);
+	});
+
+	await t.test("pipeline commands share a group", () => {
+		assert.deepEqual(summarizeGroups("cat foo | grep bar"), [
+			{ name: "cat", group: 0 },
+			{ name: "grep", group: 0 },
+		]);
+	});
+
+	await t.test("&& commands share a group", () => {
+		assert.deepEqual(summarizeGroups("git commit && git push"), [
+			{ name: "git", group: 0 },
+			{ name: "git", group: 0 },
+		]);
+	});
+
+	await t.test("; separated commands share a group", () => {
+		assert.deepEqual(summarizeGroups("cd foo; rm bar"), [
+			{ name: "cd", group: 0 },
+			{ name: "rm", group: 0 },
+		]);
+	});
+
+	await t.test("subshell expansion gets different group", () => {
+		const groups = summarizeGroups("echo $(git status)");
+		assert.equal(groups.length, 2);
+		assert.equal(groups[0]?.name, "echo");
+		assert.equal(groups[1]?.name, "git");
+		assert.notEqual(groups[0]?.group, groups[1]?.group);
+	});
+
+	await t.test("nested pipeline inside subshell gets its own group", () => {
+		const groups = summarizeGroups("echo $(cat foo | grep bar)");
+		assert.equal(groups.length, 3);
+		const echoGroup = groups.find((g) => g.name === "echo")?.group;
+		const catGroup = groups.find((g) => g.name === "cat")?.group;
+		const grepGroup = groups.find((g) => g.name === "grep")?.group;
+		assert.equal(catGroup, grepGroup); // same group (pipeline)
+		assert.notEqual(echoGroup, catGroup); // different from outer
+	});
+
+	await t.test("mixed pipeline and && share group", () => {
+		assert.deepEqual(summarizeGroups("cat foo | grep bar && sort out"), [
+			{ name: "cat", group: 0 },
+			{ name: "grep", group: 0 },
+			{ name: "sort", group: 0 },
+		]);
+	});
+});
