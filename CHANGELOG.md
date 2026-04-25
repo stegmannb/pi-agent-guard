@@ -5,10 +5,14 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Wrapper command expansion** — Commands like `xargs`, `sudo`, `bash -c`, `find -exec`, and `fd -x` that embed sub-commands are now expanded and each sub-command is independently checked against rules. For example, `xargs rm` is now checked as both `xargs` (allowed) and `rm` (ask). Nested wrappers are also handled (`sudo xargs rm` → checks `rm` through both).
+- Wrapper display in approval prompts — Expanded wrapper commands show `...` in place of the sub-command to avoid redundancy. For example, `xargs rm` displays as `xargs ...` with `rm` shown separately.
+- `xargs` and `fd` added to default allow rules — safe wrappers whose sub-commands are independently checked.
 - Glob patterns (`*` and `?`) in bash command rule tokens — e.g., `"sed -i*": "ask"` matches `-i`, `-i.bak`, and any other `-i` variant.
 - Default rules: `sed` is allowed; `sed -i*`, `sed -I*`, and `sed --in-place*` (in-place edits) require approval.
 
 ### Changed
+- Removed `"find -exec": "ask"` from default rules — sub-commands inside `-exec` are now independently checked by wrapper expansion, making the blanket rule redundant.
 - `isSubsequence` now supports glob wildcards in tokens (via `minimatch`) instead of exact string matching only.
 
 ## [1.3.0] - 2026-04-25

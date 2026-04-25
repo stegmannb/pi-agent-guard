@@ -16,6 +16,7 @@ import {
 } from "./prompt.ts";
 import { getCommandArgs, getCommandName } from "./resolve.ts";
 import type { Action, CommandRef, ToolCallInput } from "./types.ts";
+import { expandWrapperCommands } from "./wrappers.ts";
 
 export async function handleInteractiveApproval(
 	pi: ExtensionAPI,
@@ -89,7 +90,9 @@ export async function handleBashTool(
 		return;
 	}
 
-	const allCommands = extractAllCommandsFromAST(ast, rawCmd);
+	const { commands: allCommands, expandedWrappers } = expandWrapperCommands(
+		extractAllCommandsFromAST(ast, rawCmd),
+	);
 	if (allCommands.length === 0) return;
 
 	const unauthorizedCommands: CommandRef[] = [];
@@ -127,6 +130,8 @@ export async function handleBashTool(
 	}
 
 	// Interactive: prompt user
+	// Show expanded wrappers with `...` replacing the sub-command portion
+	// to avoid redundancy (e.g. "xargs rm" + "rm" → "xargs ..." + "rm").
 	const uniqueBaseNames = Array.from(
 		new Set(unauthorizedCommands.map(getCommandName)),
 	);
@@ -134,7 +139,12 @@ export async function handleBashTool(
 
 	pi.events.emit("nudge", { body: "Command needs approval" });
 	const choice = await ctx.ui.select(
-		buildApprovalPrompt(allCommands, unauthorizedCommands),
+		buildApprovalPrompt(
+			allCommands,
+			unauthorizedCommands,
+			undefined,
+			expandedWrappers,
+		),
 		["Allow", alwaysLabel, "Reject"],
 	);
 

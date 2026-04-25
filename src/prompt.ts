@@ -1,5 +1,6 @@
 import { formatCommand, truncate } from "./format.ts";
 import type { CommandRef } from "./types.ts";
+import { formatWrapperDisplay } from "./wrappers.ts";
 
 export interface ApprovalPromptOptions {
 	maxLength?: number;
@@ -10,11 +11,15 @@ export function buildApprovalPrompt(
 	allCommands: CommandRef[],
 	unauthorizedCommands: CommandRef[],
 	options?: ApprovalPromptOptions,
+	expandedWrappers?: Set<CommandRef>,
 ): string {
 	const unauthorizedSet = new Set(unauthorizedCommands);
 	const lines = allCommands.map((command) => {
 		const marker = unauthorizedSet.has(command) ? "✖" : "✔";
-		return `${marker} ${formatCommand(command, options)}`;
+		const display = expandedWrappers?.has(command)
+			? formatWrapperDisplay(command)
+			: formatCommand(command, options);
+		return `${marker} ${display}`;
 	});
 
 	return ["⚠️ Unapproved Commands", "", ...lines].join("\n");

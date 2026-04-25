@@ -95,10 +95,22 @@ Tools without a matcher get simple allow/ask/deny for the whole tool.
 
 1. Parse command with unbash AST parser
 2. Extract all commands from the AST
-3. For each command, check rules using subsequence matching
-4. Tokens in rule must appear in order, extra arguments allowed
+3. Expand wrapper commands (e.g., `xargs rm` → `xargs` + `rm`, `sudo rm` → `sudo` + `rm`, `find -exec rm {} \;` → `find -exec` + `rm`, `bash -c 'rm -rf /'` → `bash -c` + `rm`)
+4. For each command, check rules using subsequence matching
+5. Tokens in rule must appear in order, extra arguments allowed
 
 Example: `"git log"` matches `git log`, `git log --oneline`, `git log --oneline -10`
+
+#### Wrapper commands
+
+Commands like `xargs`, `sudo`, `bash -c`, `find -exec`, and `fd -x` embed sub-commands. pi-guard extracts and independently checks those sub-commands against rules. Nested wrappers are handled too — `sudo xargs rm` checks `rm` through both `sudo` and `xargs`.
+
+In approval prompts, the wrapper's sub-command is replaced with `...` to avoid duplication:
+
+```
+✔ xargs ...
+✖ rm
+```
 
 ### Glob (type: "glob")
 

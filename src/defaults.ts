@@ -27,7 +27,6 @@ export const DEFAULT_CONFIG = {
 			fd: "allow",
 			file: "allow",
 			find: "allow",
-			"find -exec": "ask",
 			fold: "allow",
 			fmt: "allow",
 			"gh issue list": "allow",
@@ -75,6 +74,7 @@ export const DEFAULT_CONFIG = {
 			wc: "allow",
 			which: "allow",
 			whoami: "allow",
+			xargs: "allow",
 			yq: "allow",
 		},
 		read: {

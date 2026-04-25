@@ -275,7 +275,7 @@ test("resolveBashAction", async (t) => {
 	});
 
 	await t.test(
-		"find allow overrides find -exec ask via last-match-wins",
+		"subcommand pattern overrides base command via last-match-wins",
 		() => {
 			const rules = { find: "allow" as const, "find -exec": "ask" as const };
 			assert.equal(resolveBashAction("find", ["."], rules), "allow");
