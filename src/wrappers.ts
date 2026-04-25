@@ -33,6 +33,8 @@ export type WrapperSpec =
 export const WRAPPER_COMMANDS: Record<string, WrapperSpec> = {
 	xargs: {
 		type: "passthrough",
+		// Only flags that consume a separate value argument.
+		// Boolean flags (-o, -p, -r, -t, -x) are intentionally omitted.
 		flagArgs: [
 			"-a",
 			"-d",
@@ -43,41 +45,22 @@ export const WRAPPER_COMMANDS: Record<string, WrapperSpec> = {
 			"-L",
 			"-l",
 			"-n",
-			"-o",
 			"-P",
-			"-p",
-			"-r",
 			"-s",
-			"-t",
-			"-x",
 		],
 	},
 	sudo: {
 		type: "passthrough",
-		flagArgs: [
-			"-A",
-			"-C",
-			"-D",
-			"-g",
-			"-h",
-			"-K",
-			"-k",
-			"-l",
-			"-n",
-			"-p",
-			"-r",
-			"-S",
-			"-U",
-			"-u",
-			"-V",
-			"-v",
-		],
+		// Only flags that consume a separate value argument.
+		// Boolean flags (-A, -h, -K, -k, -n, -S, -V, -v) are intentionally omitted.
+		flagArgs: ["-C", "-D", "-g", "-l", "-p", "-r", "-U", "-u"],
 	},
 	nice: { type: "passthrough", flagArgs: ["-n"] },
 	nohup: { type: "passthrough" },
 	env: {
 		type: "passthrough",
-		flagArgs: ["-C", "-S", "-u", "-v"],
+		// -v is --debug (boolean); only flags that consume a value are listed.
+		flagArgs: ["-C", "-S", "-u"],
 		skipVarAssignments: true,
 	},
 	strace: {
@@ -103,6 +86,13 @@ export const WRAPPER_COMMANDS: Record<string, WrapperSpec> = {
 	},
 };
 
+/** Tracks which wrapper commands had sub-commands extracted. Used by
+ * formatWrapperDisplay to replace the sub-command portion with `...`. */
+export type ExpansionResult = {
+	commands: CommandRef[];
+	expandedWrappers: Set<CommandRef>;
+};
+
 /**
  * Given a list of CommandRefs, expand any wrapper commands by extracting
  * their sub-commands. The original wrapper command is kept — it still needs
@@ -112,13 +102,6 @@ export const WRAPPER_COMMANDS: Record<string, WrapperSpec> = {
  * Degenerate cases (wrapper with no sub-command, e.g. bare `xargs`) are
  * silently ignored — the wrapper itself is still checked against rules.
  */
-/** Tracks which wrapper commands had sub-commands extracted. Used by
- * formatWrapperDisplay to replace the sub-command portion with `...`. */
-export type ExpansionResult = {
-	commands: CommandRef[];
-	expandedWrappers: Set<CommandRef>;
-};
-
 export function expandWrapperCommands(commands: CommandRef[]): ExpansionResult {
 	const expandedWrappers = new Set<CommandRef>();
 	const result = doExpand(commands, expandedWrappers);
@@ -165,6 +148,63 @@ function extractSubCommands(cmd: CommandRef, spec: WrapperSpec): CommandRef[] {
 }
 
 /**
+ * Scan past a passthrough wrapper's own flags to find where the sub-command starts.
+ * Returns the index of the first sub-command argument, or args.length if none found.
+ *
+ * Handles:
+ * 1. Combined short flags with value: -n1 (xargs style)
+ * 2. Flags with separate values: -n 1, -u root
+ * 3. Long flags with values: --rcfile=file, --rcfile file
+ * 4. NAME=VALUE var assignments (for env and similar)
+ */
+function scanPassthroughBoundary(
+	args: string[],
+	flagArgs?: string[],
+	skipVarAssignments = false,
+): number {
+	let i = 0;
+	while (i < args.length) {
+		const arg = args[i];
+		if (arg === undefined) break;
+
+		if (skipVarAssignments && /^[A-Za-z_][A-Za-z0-9_]*=/.test(arg)) {
+			i++;
+			continue;
+		}
+
+		if (!arg.startsWith("-")) break;
+
+		if (arg.includes("=")) {
+			i++;
+			continue;
+		}
+
+		// Combined short flag with value: -n1
+		if (arg.length > 2 && !arg.startsWith("--")) {
+			const flagPrefix = arg.slice(0, 2);
+			if (takesValue(flagPrefix, flagArgs)) {
+				i++;
+				continue;
+			}
+		}
+
+		i++;
+		if (takesValue(arg, flagArgs) && i < args.length) {
+			// Skip the value arg, unless it looks like a flag or var assignment.
+			const nextArg = args[i];
+			if (
+				nextArg &&
+				!nextArg.startsWith("-") &&
+				!(skipVarAssignments && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nextArg))
+			) {
+				i++;
+			}
+		}
+	}
+	return i;
+}
+
+/**
  * For passthrough wrappers: skip the wrapper's own flags (and optionally
  * NAME=VALUE var assignments), then parse the remaining arguments as a
  * command string.
@@ -177,70 +217,9 @@ function extractPassthrough(
 	skipVarAssignments = false,
 ): CommandRef[] {
 	const args = getCommandArgs(cmd);
-
-	// Skip flags that belong to the wrapper command.
-	// We handle:
-	// 1. Combined short flags with value: -n1 (xargs style)
-	// 2. Flags with separate values: -n 1, -u root
-	// 3. Long flags with values: --rcfile=file, --rcfile file
-	// 4. NAME=VALUE var assignments (for env and similar)
-
-	let i = 0;
-	while (i < args.length) {
-		const arg = args[i];
-		if (arg === undefined) break;
-
-		// Skip NAME=VALUE var assignments (for env, etc.)
-		if (skipVarAssignments && /^[A-Za-z_][A-Za-z0-9_]*=/.test(arg)) {
-			i++;
-			continue;
-		}
-
-		// If it doesn't start with -, we've found the sub-command
-		if (!arg.startsWith("-")) break;
-
-		// It's a flag. Check if it takes a value.
-		if (arg.includes("=")) {
-			// --flag=value or -f=value: value is inline, no separate arg to skip
-			i++;
-			continue;
-		}
-
-		// Check for combined short flag with value: -n1
-		// This is a single arg like "-n1" where "-n" takes a value and "1" is that value
-		if (arg.length > 2 && arg.startsWith("-") && !arg.startsWith("--")) {
-			const flagPrefix = arg.slice(0, 2); // e.g. "-n"
-			if (takesValue(flagPrefix, flagArgs)) {
-				// Combined flag+value — no separate value arg to skip
-				i++;
-				continue;
-			}
-		}
-
-		// Regular flag (short or long)
-		i++;
-		const flagTakesValue = takesValue(arg, flagArgs);
-		if (flagTakesValue && i < args.length) {
-			// The next arg might be the value for this flag.
-			// But be careful: the next arg could also be a flag or a var assignment
-			// rather than a plain value. We use a heuristic: if the next arg looks
-			// like a flag or a var assignment, don't skip it.
-			const nextArg = args[i];
-			if (
-				nextArg &&
-				!nextArg.startsWith("-") &&
-				!(skipVarAssignments && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nextArg))
-			) {
-				i++;
-			}
-		}
-	}
-
+	const i = scanPassthroughBoundary(args, flagArgs, skipVarAssignments);
 	if (i >= args.length) return [];
-
-	// The remaining args form the sub-command
-	const subCommandStr = args.slice(i).join(" ");
-	return parseSubCommandString(subCommandStr);
+	return parseSubCommandString(args.slice(i).join(" "));
 }
 
 /**
@@ -261,7 +240,6 @@ function extractFlag(
 		const arg = args[i];
 
 		if (arg === targetFlag) {
-			// Next arg is the script
 			const scriptArg = args[i + 1];
 			if (scriptArg) {
 				return parseSubCommandString(scriptArg);
@@ -272,12 +250,11 @@ function extractFlag(
 		// Skip other flags that might consume values
 		if (arg?.startsWith("-")) {
 			if (arg.includes("=")) {
-				// --flag=value: skip entire arg
 				i++;
 				continue;
 			}
 
-			// Check for combined short flag with value
+			// Combined short flag with value
 			if (arg.length > 2 && !arg.startsWith("--")) {
 				const flagPrefix = arg.slice(0, 2);
 				if (takesValue(flagPrefix, flagArgs)) {
@@ -297,9 +274,8 @@ function extractFlag(
 			continue;
 		}
 
-		// Non-flag arg before our target flag — this is a positional argument
-		// For bash, `bash script.sh` is non-wrapped usage.
-		// We've passed the point where -c would appear, so stop looking.
+		// Non-flag arg before our target flag — this is a positional argument.
+		// For bash, `bash script.sh` is non-wrapped usage; stop looking.
 		i++;
 	}
 
@@ -323,23 +299,22 @@ function extractExec(
 	let i = 0;
 	while (i < args.length) {
 		const arg = args[i];
-		if (keywords.includes(arg ?? "")) {
+		if (arg === undefined) break;
+		if (keywords.includes(arg)) {
 			i++;
-			// Collect the sub-command
 			const cmdParts: string[] = [];
 			while (i < args.length) {
 				const part = args[i];
-				if (terminators?.includes(part ?? "")) {
+				if (part === undefined) break;
+				if (terminators?.includes(part)) {
 					i++;
 					break;
 				}
-				cmdParts.push(part ?? "");
+				cmdParts.push(part);
 				i++;
 			}
 			if (cmdParts.length > 0) {
-				const subCommandStr = cmdParts.join(" ");
-				const extracted = parseSubCommandString(subCommandStr);
-				results.push(...extracted);
+				results.push(...parseSubCommandString(cmdParts.join(" ")));
 			}
 			continue;
 		}
@@ -407,53 +382,12 @@ function formatPassthroughDisplay(
 	args: string[],
 	spec: { flagArgs?: string[]; skipVarAssignments?: boolean },
 ): string {
-	const displayParts: string[] = [name];
-
-	let i = 0;
-	while (i < args.length) {
-		const arg = args[i];
-		if (arg === undefined) break;
-
-		if (spec.skipVarAssignments && /^[A-Za-z_][A-Za-z0-9_]*=/.test(arg)) {
-			displayParts.push(arg);
-			i++;
-			continue;
-		}
-
-		if (!arg.startsWith("-")) break;
-
-		if (arg.includes("=")) {
-			displayParts.push(arg);
-			i++;
-			continue;
-		}
-
-		if (arg.length > 2 && arg.startsWith("-") && !arg.startsWith("--")) {
-			const flagPrefix = arg.slice(0, 2);
-			if (takesValue(flagPrefix, spec.flagArgs)) {
-				displayParts.push(arg);
-				i++;
-				continue;
-			}
-		}
-
-		displayParts.push(arg);
-		i++;
-		if (takesValue(arg, spec.flagArgs) && i < args.length) {
-			const nextArg = args[i];
-			if (
-				nextArg &&
-				!nextArg.startsWith("-") &&
-				!(spec.skipVarAssignments && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nextArg))
-			) {
-				displayParts.push(nextArg);
-				i++;
-			}
-		}
-	}
-
-	displayParts.push("...");
-	return displayParts.join(" ");
+	const i = scanPassthroughBoundary(
+		args,
+		spec.flagArgs,
+		spec.skipVarAssignments,
+	);
+	return [name, ...args.slice(0, i), "..."].join(" ");
 }
 
 function formatFlagDisplay(
@@ -480,6 +414,7 @@ function formatFlagDisplay(
 				continue;
 			}
 
+			// Combined short flag with value
 			if (arg.length > 2 && !arg.startsWith("--")) {
 				const flagPrefix = arg.slice(0, 2);
 				if (takesValue(flagPrefix, spec.flagArgs)) {
@@ -519,12 +454,13 @@ function formatExecDisplay(
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
-		if (keywords.includes(arg ?? "")) {
-			displayParts.push(arg ?? "");
+		if (arg === undefined) break;
+		if (keywords.includes(arg)) {
+			displayParts.push(arg);
 			displayParts.push("...");
 			return displayParts.join(" ");
 		}
-		displayParts.push(arg ?? "");
+		displayParts.push(arg);
 	}
 
 	// No keyword found — just return as-is

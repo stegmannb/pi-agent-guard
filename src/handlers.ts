@@ -130,8 +130,6 @@ export async function handleBashTool(
 	}
 
 	// Interactive: prompt user
-	// Show expanded wrappers with `...` replacing the sub-command portion
-	// to avoid redundancy (e.g. "xargs rm" + "rm" → "xargs ..." + "rm").
 	const uniqueBaseNames = Array.from(
 		new Set(unauthorizedCommands.map(getCommandName)),
 	);
