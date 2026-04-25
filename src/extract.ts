@@ -32,6 +32,23 @@ function allocGroupId(ctx: ExtractCtx): number {
 	return ctx.nextGroupId++;
 }
 
+/** Find the last CommandRef in commands that has the given group,
+ *  searching from startIdx onward. Returns undefined if none found.
+ *  This is used to assign joiners to the correct command when recursive
+ *  extraction (e.g. subshells) has added commands from different groups. */
+function findLastInGroup(
+	commands: CommandRef[],
+	groupId: number,
+	startIdx: number,
+): CommandRef | undefined {
+	for (let i = commands.length - 1; i >= startIdx; i--) {
+		if (commands[i]?.group === groupId) {
+			return commands[i];
+		}
+	}
+	return undefined;
+}
+
 export function extractAllCommandsFromAST(
 	node: Script | Node,
 	source: string,
@@ -59,14 +76,10 @@ function collectNode(
 			for (const [i, child] of node.commands.entries()) {
 				const startIdx = commands.length;
 				collectNode(child, source, commands, groupId, ctx);
-				const lastCmd = commands[commands.length - 1];
+				const joinerTarget = findLastInGroup(commands, groupId, startIdx);
 				// Set ; joiner on last command from each child except the last
-				if (
-					i < node.commands.length - 1 &&
-					commands.length > startIdx &&
-					lastCmd
-				) {
-					lastCmd.joiner = ";";
+				if (i < node.commands.length - 1 && joinerTarget) {
+					joinerTarget.joiner = ";";
 				}
 			}
 			return;
@@ -77,11 +90,11 @@ function collectNode(
 			for (const [i, child] of node.commands.entries()) {
 				const startIdx = commands.length;
 				collectNode(child, source, commands, groupId, ctx);
-				const lastCmd = commands[commands.length - 1];
+				const joinerTarget = findLastInGroup(commands, groupId, startIdx);
 				const op = node.operators[i];
 				// Set operator joiner on last command from each child
-				if (op !== undefined && commands.length > startIdx && lastCmd) {
-					lastCmd.joiner = op as "|" | "&&" | "||";
+				if (op !== undefined && joinerTarget) {
+					joinerTarget.joiner = op as "|" | "&&" | "||";
 				}
 			}
 			return;
@@ -480,13 +493,9 @@ function collectArithmeticCommands(
 			for (const [i, child] of node.commands.entries()) {
 				const startIdx = commands.length;
 				collectArithmeticCommands(child, source, commands, groupId, ctx);
-				const lastCmd = commands[commands.length - 1];
-				if (
-					i < node.commands.length - 1 &&
-					commands.length > startIdx &&
-					lastCmd
-				) {
-					lastCmd.joiner = ";";
+				const joinerTarget = findLastInGroup(commands, groupId, startIdx);
+				if (i < node.commands.length - 1 && joinerTarget) {
+					joinerTarget.joiner = ";";
 				}
 			}
 			return;
@@ -497,10 +506,10 @@ function collectArithmeticCommands(
 			for (const [i, child] of node.commands.entries()) {
 				const startIdx = commands.length;
 				collectArithmeticCommands(child, source, commands, groupId, ctx);
-				const lastCmd = commands[commands.length - 1];
+				const joinerTarget = findLastInGroup(commands, groupId, startIdx);
 				const op = node.operators[i];
-				if (op !== undefined && commands.length > startIdx && lastCmd) {
-					lastCmd.joiner = op as "|" | "&&" | "||";
+				if (op !== undefined && joinerTarget) {
+					joinerTarget.joiner = op as "|" | "&&" | "||";
 				}
 			}
 			return;

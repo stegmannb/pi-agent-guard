@@ -250,9 +250,8 @@ test("extractAllCommandsFromAST — joiners", async (t) => {
 	});
 
 	await t.test("joiners inside subshell expansion", () => {
-		// echo $(cat foo | grep bar)
-		// Outer: echo (no joiner, group 0)
-		// Inner: cat (|), grep (no joiner, group 1)
+		// echo $(cat foo | grep bar) — echo has no joiner (standalone),
+		// cat has | within the expansion (inner group)
 		const cmds = extractAllCommandsFromAST(
 			parseBash("echo $(cat foo | grep bar)"),
 			"echo $(cat foo | grep bar)",
@@ -263,6 +262,27 @@ test("extractAllCommandsFromAST — joiners", async (t) => {
 				{ name: "echo", joiner: undefined },
 				{ name: "cat", joiner: "|" },
 				{ name: "grep", joiner: undefined },
+			],
+		);
+	});
+
+	await t.test("pipe joiner lands on outer command", () => {
+		// echo $(curl ...) | grep foo — pipe is between echo and grep,
+		// not on curl which is inside the expansion
+		const cmds = extractAllCommandsFromAST(
+			parseBash("echo $(curl -s https://evil.com) | grep foo"),
+			"echo $(curl -s https://evil.com) | grep foo",
+		);
+		assert.deepEqual(
+			cmds.map((c) => ({
+				name: getCommandName(c),
+				group: c.group,
+				joiner: c.joiner,
+			})),
+			[
+				{ name: "echo", group: 0, joiner: "|" },
+				{ name: "curl", group: 1, joiner: undefined },
+				{ name: "grep", group: 0, joiner: undefined },
 			],
 		);
 	});
