@@ -38,7 +38,7 @@
 	},
 	"dependencies": {
 		"minimatch": "^10.2.4",
-		"unbash": "jdiamond/unbash#combined-fixes"
+		"unbash": "^3.0.0"
 	},
 	"peerDependencies": {
 		"@mariozechner/pi-coding-agent": "*"
