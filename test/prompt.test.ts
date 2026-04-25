@@ -129,13 +129,9 @@ test("buildApprovalPrompt", async (t) => {
 
 		assert.equal(
 			buildApprovalPrompt(commands, unauthorized),
-			[
-				"⚠️ Unapproved Commands",
-				"",
-				"✖ echo $(sort out)",
-				"",
-				"✖ sort out",
-			].join("\n"),
+			["⚠️ Unapproved Commands", "", "✖ echo $(...)", "", "✖ sort out"].join(
+				"\n",
+			),
 		);
 	});
 
@@ -153,7 +149,7 @@ test("buildApprovalPrompt", async (t) => {
 			[
 				"⚠️ Unapproved Commands",
 				"",
-				"✖ echo $(cat foo | grep bar)",
+				"✖ echo $(...)",
 				"",
 				"✖ cat foo |",
 				"✖ grep bar",

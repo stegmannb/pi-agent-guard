@@ -1,4 +1,12 @@
-import type { Redirect, Word } from "unbash";
+import type {
+	CommandExpansionPart,
+	DoubleQuotedPart,
+	LocaleStringPart,
+	ProcessSubstitutionPart,
+	Redirect,
+	Word,
+	WordPart,
+} from "unbash";
 import type { CommandRef } from "./types.ts";
 
 export const FORMAT_COMMAND_DEFAULT_MAX_LENGTH = 120;
@@ -29,10 +37,16 @@ export function formatCommand(
 	const argMaxLength =
 		options?.argMaxLength ?? FORMAT_COMMAND_DEFAULT_ARG_MAX_LENGTH;
 
-	const name = displayWord(cmd.node.name, cmd.source).replace(/\n/g, "↵");
+	const name = displayWordElidingExpansions(cmd.node.name, cmd.source).replace(
+		/\n/g,
+		"↵",
+	);
 	const tokenSpecs = [
 		...cmd.node.suffix.map((arg) => {
-			const full = displayWord(arg, cmd.source).replace(/\n/g, "↵");
+			const full = displayWordElidingExpansions(arg, cmd.source).replace(
+				/\n/g,
+				"↵",
+			);
 			return makeTokenSpec(full, argMaxLength);
 		}),
 		...cmd.node.redirects.map((redirect) => {
@@ -134,6 +148,82 @@ function displayWord(word: Word | undefined, source: string): string {
 	if (!word) return "";
 	const sliced = source.slice(word.pos, word.end);
 	return sliced.length > 0 ? sliced : word.text;
+}
+
+/**
+ * Display a word with command expansions and process substitutions replaced
+ * by `...`. This avoids duplicating sub-command content that appears on
+ * subsequent lines of the approval prompt.
+ *
+ * For example, `echo $(cat foo | grep bar)` displays as `echo $(...)`
+ * instead of `echo $(cat foo | grep bar)`.
+ */
+function displayWordElidingExpansions(
+	word: Word | undefined,
+	source: string,
+): string {
+	if (!word) return "";
+	if (!word.parts) return displayWord(word, source);
+	return reconstructWordElidingExpansions(word.parts, source);
+}
+
+function reconstructWordElidingExpansions(
+	parts: WordPart[] | undefined,
+	source: string,
+): string {
+	if (!parts) return "";
+	let result = "";
+	for (const part of parts) {
+		switch (part.type) {
+			case "CommandExpansion":
+				result += elideCommandExpansion(part);
+				break;
+			case "ProcessSubstitution":
+				result += elideProcessSubstitution(part);
+				break;
+			case "DoubleQuoted":
+			case "LocaleString":
+				result += reconstructQuotedExpansion(part, source);
+				break;
+			default:
+				// Literal, SingleQuoted, AnsiCQuoted, SimpleExpansion,
+				// ParameterExpansion, ArithmeticExpansion, ExtendedGlob, BraceExpansion
+				result +=
+					"pos" in part && "end" in part
+						? source.slice(part.pos as number, part.end as number) || part.text
+						: part.text;
+				break;
+		}
+	}
+	return result;
+}
+
+function elideCommandExpansion(part: CommandExpansionPart): string {
+	const text = part.text;
+	if (text.startsWith("$(") && text.endsWith(")")) {
+		return "$(...)";
+	}
+	if (text.startsWith("`") && text.endsWith("`")) {
+		return "`...`";
+	}
+	// Fallback: replace the inner content with ...
+	return text;
+}
+
+function elideProcessSubstitution(part: ProcessSubstitutionPart): string {
+	const op = part.operator === ">" ? ">" : "<";
+	return `${op}(...)`;
+}
+
+function reconstructQuotedExpansion(
+	part: DoubleQuotedPart | LocaleStringPart,
+	source: string,
+): string {
+	const inner = reconstructWordElidingExpansions(part.parts, source);
+	// Double-quoted: wrap in quotes
+	if (part.type === "DoubleQuoted") return `"${inner}"`;
+	// Locale string ($"..."): preserve the $"..." syntax
+	return `$"${inner}"`;
 }
 
 function makeTokenSpec(

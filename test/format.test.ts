@@ -138,7 +138,10 @@ test("formatCommand", async (t) => {
 			"formats both outer and inner commands for double-quoted command substitution",
 			() => {
 				const raw = `python3 -c 'print("ok")' "hello $(python3 -c 'print("inner")')"`;
-				assert.deepEqual(displays(raw), [raw, `python3 -c 'print("inner")'`]);
+				assert.deepEqual(displays(raw), [
+					`python3 -c 'print("ok")' "hello $(...)"`,
+					`python3 -c 'print("inner")'`,
+				]);
 			},
 		);
 
@@ -152,14 +155,20 @@ test("formatCommand", async (t) => {
 
 		await t.test("formats inner commands extracted from backticks", () => {
 			const raw = "echo `python3 -c 'print(\"inner\")'`";
-			assert.deepEqual(displays(raw), [raw, `python3 -c 'print("inner")'`]);
+			assert.deepEqual(displays(raw), [
+				"echo `...`",
+				`python3 -c 'print("inner")'`,
+			]);
 		});
 
 		await t.test(
 			"formats inner commands extracted from process substitution",
 			() => {
 				const raw = `cat <(python3 -c 'print("inner")')`;
-				assert.deepEqual(displays(raw), [raw, `python3 -c 'print("inner")'`]);
+				assert.deepEqual(displays(raw), [
+					"cat <(...)",
+					`python3 -c 'print("inner")'`,
+				]);
 			},
 		);
 
@@ -168,7 +177,7 @@ test("formatCommand", async (t) => {
 			() => {
 				const raw = `python3 -c 'print("outer")' "$(python3 -c 'print("one")')" "$(python3 -c 'print("two")')"`;
 				assert.deepEqual(displays(raw), [
-					raw,
+					`python3 -c 'print("outer")' "$(...)" "$(...)"`,
 					`python3 -c 'print("one")'`,
 					`python3 -c 'print("two")'`,
 				]);

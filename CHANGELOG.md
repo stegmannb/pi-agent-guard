@@ -11,6 +11,12 @@ All notable changes to this project will be documented in this file.
   ✔ grep bar |
   ✖ wc -l
   ```
+- **Subshell elision in approval prompts** — Command expansions (`$()`, backticks) and process substitutions (`<()`, `>()`) in the outer command are replaced with `...` to avoid duplication, since the inner commands are displayed on their own lines.
+  ```
+  ✖ echo $(...)
+
+  ✖ sort out
+  ```
 - **Wrapper command expansion** — Commands like `xargs`, `sudo`, `bash -c`, `find -exec`, and `fd -x` that embed sub-commands are now expanded and each sub-command is independently checked against rules. For example, `xargs rm` is now checked as both `xargs` (allowed) and `rm` (ask). Nested wrappers are also handled (`sudo xargs rm` → checks `rm` through both).
 - Wrapper display in approval prompts — Expanded wrapper commands show `...` in place of the sub-command to avoid redundancy. For example, `xargs rm` displays as `xargs ...` with `rm` shown separately.
 - `xargs` and `fd` added to default allow rules — safe wrappers whose sub-commands are independently checked.
