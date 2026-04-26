@@ -192,6 +192,11 @@ test("formatCommand", async (t) => {
 			assert.equal(formatCommand(first(raw)), raw);
 		});
 
+		await t.test("preserves space in output redirect", () => {
+			const raw = `echo hello > out.txt`;
+			assert.equal(formatCommand(first(raw)), raw);
+		});
+
 		await t.test("includes input redirect in display", () => {
 			const raw = `cat <in.txt`;
 			assert.equal(formatCommand(first(raw)), raw);

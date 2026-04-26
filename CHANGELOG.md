@@ -24,9 +24,14 @@ All notable changes to this project will be documented in this file.
 - Default rules: `sed` is allowed; `sed -i*`, `sed -I*`, and `sed --in-place*` (in-place edits) require approval.
 
 ### Changed
+
 - Bare assignments (commands with prefix assignments but no command name, e.g. `TOKEN=$(...)`) are now shown in approval prompts instead of being silently dropped. Previously, `TOKEN=$(curl ... | jq ...) && curl ...` would only display the inner and outer `curl` commands — the assignment line was invisible.
 - Removed `"find -exec": "ask"` from default rules — sub-commands inside `-exec` are now independently checked by wrapper expansion, making the blanket rule redundant.
 - `isSubsequence` now supports glob wildcards in tokens (via `minimatch`) instead of exact string matching only.
+
+### Fixed
+
+- Redirect formatting in approval prompts preserves original spacing — `> /tmp/file` is no longer squished to `>/tmp/file`. The formatter now uses source slices for redirect spans instead of reconstructing from AST tokens.
 
 ## [1.3.0] - 2026-04-25
 

@@ -96,9 +96,8 @@ function isRenderableHeredoc(redirect: Redirect): boolean {
 }
 
 function renderRedirect(redirect: Redirect, source: string): string {
-	const prefix = redirectPrefix(redirect);
-	const target = redirect.target ? displayWord(redirect.target, source) : "";
-	return `${prefix}${target}`;
+	const sliced = source.slice(redirect.pos, redirect.end);
+	return sliced.length > 0 ? sliced : redirect.operator;
 }
 
 function heredocPrefix(redirect: Redirect, source: string): string {
