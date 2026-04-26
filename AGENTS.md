@@ -17,3 +17,5 @@ pi-guard is a pi extension that adds permission gating for tools. It intercepts 
 **Verify (everything):** `npm run verify` (check + test)
 
 **No `npx` or `tsx`.** This project uses Node's built-in type stripping. For single-file targeting, use scripts like `npm run lint -- <file>` passthrough. Never reach for `npx` or `tsx` as a workaround.
+
+**No non-null assertions (`!`).** Use early returns, `assert.ok` guards, or explicit `undefined` checks instead. For test helpers that need to narrow away `undefined`, use `assert.ok` before accessing the value — don't use `!` to silence the type checker.

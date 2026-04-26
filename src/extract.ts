@@ -202,7 +202,7 @@ function collectCommand(
 	groupId: number,
 	ctx: ExtractCtx,
 ) {
-	if (node.name) {
+	if (node.name || node.prefix.length > 0) {
 		commands.push({ node, source, group: groupId });
 	}
 
@@ -523,7 +523,7 @@ function collectArithmeticCommands(
 			return;
 
 		case "Command":
-			if (node.name) {
+			if (node.name || node.prefix.length > 0) {
 				commands.push({ node, source, group: groupId });
 			}
 			for (const prefix of node.prefix) {

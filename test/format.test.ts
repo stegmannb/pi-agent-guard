@@ -6,8 +6,9 @@ import { formatCommand } from "../src/format.ts";
 
 test("formatCommand", async (t) => {
 	function first(raw: string) {
-		// biome-ignore lint/style/noNonNullAssertion: test helper, caller guarantees input parses
-		return extractAllCommandsFromAST(parseBash(raw), raw)[0]!;
+		const cmds = extractAllCommandsFromAST(parseBash(raw), raw);
+		assert.ok(cmds[0], `expected at least one command: ${raw}`);
+		return cmds[0];
 	}
 
 	function displays(raw: string) {
@@ -241,6 +242,61 @@ test("formatCommand", async (t) => {
 			() => {
 				const raw = `cmd >out.txt <<EOF\nhello\nEOF`;
 				assert.equal(formatCommand(first(raw)), "cmd >out.txt <<EOF↵hello↵EOF");
+			},
+		);
+	});
+
+	await t.test("bare assignment formatting", async (t) => {
+		await t.test("formats bare assignment with subshell", () => {
+			assert.equal(
+				formatCommand(first("TOKEN=$(curl -s https://auth.example.com/token)")),
+				"TOKEN=$(...)",
+			);
+		});
+
+		await t.test("formats bare assignment with simple value", () => {
+			assert.equal(formatCommand(first("FOO=bar")), "FOO=bar");
+		});
+
+		await t.test("formats bare assignment with empty value", () => {
+			assert.equal(formatCommand(first("FOO=")), "FOO=");
+		});
+
+		await t.test("formats bare assignment with backtick expansion", () => {
+			assert.equal(formatCommand(first("FOO=`rm -rf /`")), "FOO=`...`");
+		});
+
+		await t.test("formats bare assignment with pipeline in subshell", () => {
+			const raw =
+				"TOKEN=$(curl -s https://auth.example.com/token | jq -r .access_token)";
+			assert.equal(formatCommand(first(raw)), "TOKEN=$(...)");
+		});
+
+		await t.test("formats multiple bare assignments", () => {
+			assert.equal(formatCommand(first("A=1 B=2")), "A=1 B=2");
+		});
+
+		await t.test("formats append assignment", () => {
+			// Note: += in a non-command context creates a variable assignment.
+			// unbash may parse this differently; skip if it parses as command.
+			assert.ok(formatCommand(first("PATH+=:/usr/local/bin")).includes("+="));
+		});
+
+		await t.test("formats bare assignment with quoted value", () => {
+			assert.equal(
+				formatCommand(first('MSG="hello world"')),
+				'MSG="hello world"',
+			);
+		});
+
+		await t.test(
+			"formats full example: TOKEN assignment with && joiner",
+			() => {
+				const raw =
+					'TOKEN=$(curl -s https://auth.example.com/token | jq -r .access_token) && curl -H "Authorization: Bearer $TOKEN" https://api.example.com/data';
+				const cmd = first(raw);
+				assert.equal(formatCommand(cmd), "TOKEN=$(...)");
+				assert.equal(cmd.joiner, "&&");
 			},
 		);
 	});

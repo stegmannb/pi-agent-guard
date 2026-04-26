@@ -156,6 +156,32 @@ test("buildApprovalPrompt", async (t) => {
 			].join("\n"),
 		);
 	});
+
+	await t.test("shows bare assignment with joiner", () => {
+		// TOKEN=$(curl ... | jq ...) && curl ... — assignment line appears with &&
+		const commands = extract(
+			'TOKEN=$(curl -s https://auth.example.com/token | jq -r .access_token) && curl -H "Authorization: Bearer $TOKEN" https://api.example.com/data',
+		);
+		const unauthorized = commands.filter((cmd) => {
+			const _name = getCommandName(cmd);
+			const _args = getCommandArgs(cmd);
+			return true;
+		});
+
+		assert.equal(
+			buildApprovalPrompt(commands, unauthorized),
+			[
+				"⚠️ Unapproved Commands",
+				"",
+				"✖ TOKEN=$(...) &&",
+				"",
+				"✖ curl -s https://auth.example.com/token |",
+				"✖ jq -r .access_token",
+				"",
+				'✖ curl -H "Authorization: Bearer $TOKEN" https://api.example.com/data',
+			].join("\n"),
+		);
+	});
 });
 
 test("buildFileApprovalPrompt", async (t) => {

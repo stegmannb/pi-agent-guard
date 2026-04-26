@@ -1,4 +1,5 @@
 import type {
+	AssignmentPrefix,
 	CommandExpansionPart,
 	DoubleQuotedPart,
 	LocaleStringPart,
@@ -37,6 +38,11 @@ export function formatCommand(
 	const argMaxLength =
 		options?.argMaxLength ?? FORMAT_COMMAND_DEFAULT_ARG_MAX_LENGTH;
 
+	// Assignment-only command (e.g. TOKEN=$(...)): display prefix assignments
+	if (!cmd.node.name && cmd.node.prefix.length > 0) {
+		return formatAssignmentOnlyCommand(cmd, maxLength, argMaxLength);
+	}
+
 	const name = displayWordElidingExpansions(cmd.node.name, cmd.source).replace(
 		/\n/g,
 		"↵",
@@ -67,10 +73,9 @@ export function formatCommand(
 	let overflow = fullDisplay.length - maxLength;
 
 	for (let i = tokenSpecs.length - 1; i >= 0 && overflow > 0; i--) {
-		// biome-ignore lint/style/noNonNullAssertion: i is in bounds by loop guard
-		const spec = tokenSpecs[i]!;
-		// biome-ignore lint/style/noNonNullAssertion: i is in bounds by loop guard
-		const current = tokens[i]!;
+		const spec = tokenSpecs[i];
+		const current = tokens[i];
+		if (!spec || !current) continue;
 		const maxShrink = current.length - spec.min.length;
 		if (maxShrink <= 0) continue;
 
@@ -269,6 +274,73 @@ function shrinkToken(token: string, targetLength: number, min: string): string {
  *   - Spaces don't exceed 10% of the inner length (guards against sentences
  *     that happen to contain a slash)
  */
+function formatAssignmentOnlyCommand(
+	cmd: CommandRef,
+	maxLength: number,
+	argMaxLength: number,
+): string {
+	const assignments = cmd.node.prefix.map((a) =>
+		formatAssignment(a, cmd.source).replace(/\n/g, "↵"),
+	);
+	const tokenSpecs = cmd.node.redirects.map((redirect) => {
+		if (isRenderableHeredoc(redirect)) {
+			const full = renderFullHeredoc(redirect, cmd.source);
+			const min = renderElidedHeredoc(redirect, cmd.source, argMaxLength);
+			return makeTokenSpec(full, argMaxLength, min);
+		}
+		const full = renderRedirect(redirect, cmd.source).replace(/\n/g, "↵");
+		return makeTokenSpec(full, argMaxLength);
+	});
+
+	const fullDisplay = [
+		...assignments,
+		...tokenSpecs.map((spec) => spec.full),
+	].join(" ");
+	if (fullDisplay.length <= maxLength) return fullDisplay;
+
+	// Shrink redirect tokens first, then assignments
+	const tokens = tokenSpecs.map((spec) => spec.full);
+	let overflow = fullDisplay.length - maxLength;
+
+	for (let i = tokens.length - 1; i >= 0 && overflow > 0; i--) {
+		const spec = tokenSpecs[i];
+		const current = tokens[i];
+		if (!spec || !current) continue;
+		const maxShrink = current.length - spec.min.length;
+		if (maxShrink <= 0) continue;
+
+		const nextTargetLength = current.length - Math.min(maxShrink, overflow);
+		const shrunk = spec.shrink(nextTargetLength);
+		tokens[i] = shrunk;
+		overflow -= current.length - shrunk.length;
+	}
+
+	return truncate([...assignments, ...tokens].join(" "), maxLength);
+}
+
+/** Format a single prefix assignment (e.g. "TOKEN=$(...)" or "FOO=bar"). */
+function formatAssignment(
+	assignment: AssignmentPrefix,
+	source: string,
+): string {
+	const name = assignment.index
+		? `${assignment.name}[${assignment.index}]`
+		: (assignment.name ?? "");
+	const op = assignment.append ? "+=" : "=";
+
+	if (assignment.array) {
+		const elements = assignment.array
+			.map((w) => displayWordElidingExpansions(w, source))
+			.join(" ");
+		return `${name}${op}(${elements})`;
+	}
+
+	const value = assignment.value
+		? displayWordElidingExpansions(assignment.value, source)
+		: "";
+	return `${name}${op}${value}`;
+}
+
 function isPathToken(token: string): boolean {
 	if (!token.includes("/")) return false;
 	if (token.includes("://")) return false;

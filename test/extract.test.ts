@@ -104,6 +104,7 @@ test("extractAllCommandsFromAST", async (t) => {
 
 	await t.test("extracts commands from bare assignment with subshell", () => {
 		assert.deepEqual(summarize("FOO=$(rm -rf /)"), [
+			{ name: "FOO", args: [] },
 			{ name: "rm", args: ["-rf", "/"] },
 		]);
 	});
@@ -286,6 +287,42 @@ test("extractAllCommandsFromAST — joiners", async (t) => {
 			],
 		);
 	});
+
+	await t.test("assigns joiner to bare assignment", () => {
+		// TOKEN=$(...) && curl ... — && should land on the assignment line
+		// Discovery order: assignment (group 0), inner commands (group 1), outer curl (group 0)
+		const cmds = extractAllCommandsFromAST(
+			parseBash(
+				'TOKEN=$(curl -s https://auth.example.com/token | jq -r .access_token) && curl -H "Authorization: Bearer $TOKEN" https://api.example.com/data',
+			),
+			'TOKEN=$(curl -s https://auth.example.com/token | jq -r .access_token) && curl -H "Authorization: Bearer $TOKEN" https://api.example.com/data',
+		);
+		assert.deepEqual(
+			cmds.map((c) => ({
+				name: getCommandName(c),
+				group: c.group,
+				joiner: c.joiner,
+			})),
+			[
+				{ name: "TOKEN", group: 0, joiner: "&&" },
+				{ name: "curl", group: 1, joiner: "|" },
+				{ name: "jq", group: 1, joiner: undefined },
+				{ name: "curl", group: 0, joiner: undefined },
+			],
+		);
+	});
+
+	await t.test("bare assignment without subshell", () => {
+		// FOO=bar has no sub-commands, just the assignment
+		const cmds = extractAllCommandsFromAST(parseBash("FOO=bar"), "FOO=bar");
+		assert.deepEqual(
+			cmds.map((c) => ({
+				name: getCommandName(c),
+				group: c.group,
+			})),
+			[{ name: "FOO", group: 0 }],
+		);
+	});
 });
 
 test("extractAllCommandsFromAST — groups", async (t) => {
@@ -344,6 +381,16 @@ test("extractAllCommandsFromAST — groups", async (t) => {
 			{ name: "cat", group: 0 },
 			{ name: "grep", group: 0 },
 			{ name: "sort", group: 0 },
+		]);
+	});
+
+	await t.test("bare assignment shares group with joined commands", () => {
+		// FOO=$(cmd) && bar — assignment and bar are group 0,
+		// inner cmd is group 1. Discovery order: assignment, inner cmd, bar.
+		assert.deepEqual(summarizeGroups("FOO=$(cmd) && bar"), [
+			{ name: "FOO", group: 0 },
+			{ name: "cmd", group: 1 },
+			{ name: "bar", group: 0 },
 		]);
 	});
 });
