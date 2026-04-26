@@ -9,7 +9,11 @@ import {
 	resolveExactAction,
 	resolveGlobAction,
 } from "../src/matching.ts";
-import { getCommandArgs, getCommandName } from "../src/resolve.ts";
+import {
+	getCommandArgs,
+	getCommandName,
+	isBareAssignment,
+} from "../src/resolve.ts";
 
 function _cmd(name: string, args: string[]) {
 	const raw = [name, ...args].join(" ");
@@ -422,5 +426,38 @@ test("resolveExactAction", async (t) => {
 
 	await t.test("deny action", () => {
 		assert.equal(resolveExactAction("deploy", { deploy: "deny" }), "deny");
+	});
+});
+
+test("isBareAssignment", async (t) => {
+	await t.test("returns true for bare assignment", () => {
+		const commands = extractAllCommandsFromAST(
+			parseBash("TOKEN=$(curl -s https://example.com)"),
+			"TOKEN=$(curl -s https://example.com)",
+		);
+		const assignment = commands.find((c) => !c.node.name);
+		assert.ok(assignment);
+		assert.equal(isBareAssignment(assignment), true);
+	});
+
+	await t.test("returns false for command with name", () => {
+		const commands = extractAllCommandsFromAST(
+			parseBash("curl -s https://example.com"),
+			"curl -s https://example.com",
+		);
+		const cmd = commands[0];
+		assert.ok(cmd);
+		assert.equal(isBareAssignment(cmd), false);
+	});
+
+	await t.test("returns false for command with prefix assignment", () => {
+		// FOO=bar curl ... — has both prefix assignment AND a command name
+		const commands = extractAllCommandsFromAST(
+			parseBash("FOO=bar curl -s https://example.com"),
+			"FOO=bar curl -s https://example.com",
+		);
+		const cmd = commands[0];
+		assert.ok(cmd);
+		assert.equal(isBareAssignment(cmd), false);
 	});
 });

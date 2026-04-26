@@ -14,7 +14,7 @@ import {
 	buildCustomApprovalPrompt,
 	buildFileApprovalPrompt,
 } from "./prompt.ts";
-import { getCommandArgs, getCommandName } from "./resolve.ts";
+import { getCommandArgs, getCommandName, isBareAssignment } from "./resolve.ts";
 import type { Action, CommandRef, ToolCallInput } from "./types.ts";
 import { expandWrapperCommands } from "./wrappers.ts";
 
@@ -98,6 +98,11 @@ export async function handleBashTool(
 	const unauthorizedCommands: CommandRef[] = [];
 
 	for (const cmd of allCommands) {
+		// Bare assignments (e.g. TOKEN=$(...)) are not real commands —
+		// they're just variable assignments. The commands inside $(...) are
+		// checked separately, so the assignment itself is always allowed.
+		if (isBareAssignment(cmd)) continue;
+
 		const name = getCommandName(cmd);
 		const args = getCommandArgs(cmd);
 		const action = resolveBashAction(name, args, toolRules);

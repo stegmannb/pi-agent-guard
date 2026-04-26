@@ -158,14 +158,17 @@ test("buildApprovalPrompt", async (t) => {
 	});
 
 	await t.test("shows bare assignment with joiner", () => {
-		// TOKEN=$(curl ... | jq ...) && curl ... — assignment line appears with &&
+		// TOKEN=$(curl ... | jq ...) && curl ... — assignment appears with ✔
+		// (bare assignments are always allowed, not checked against rules)
 		const commands = extract(
 			'TOKEN=$(curl -s https://auth.example.com/token | jq -r .access_token) && curl -H "Authorization: Bearer $TOKEN" https://api.example.com/data',
 		);
 		const unauthorized = commands.filter((cmd) => {
-			const _name = getCommandName(cmd);
-			const _args = getCommandArgs(cmd);
-			return true;
+			const name = getCommandName(cmd);
+			const args = getCommandArgs(cmd);
+			// Bare assignment is always allowed — skip it
+			if (!cmd.node.name && cmd.node.prefix.length > 0) return false;
+			return resolveBashAction(name, args, { "*": "ask" }) !== "allow";
 		});
 
 		assert.equal(
@@ -173,7 +176,7 @@ test("buildApprovalPrompt", async (t) => {
 			[
 				"⚠️ Unapproved Commands",
 				"",
-				"✖ TOKEN=$(...) &&",
+				"✔ TOKEN=$(...) &&",
 				"",
 				"✖ curl -s https://auth.example.com/token |",
 				"✖ jq -r .access_token",

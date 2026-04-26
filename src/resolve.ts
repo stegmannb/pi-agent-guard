@@ -9,6 +9,12 @@ export function getCommandName(cmd: CommandRef): string {
 	return "";
 }
 
+/** Returns true if this is a bare assignment (no command name, only prefix assignments).
+ *  E.g. TOKEN=$(curl ...) — not a real command, just a variable assignment. */
+export function isBareAssignment(cmd: CommandRef): boolean {
+	return !cmd.node.name && cmd.node.prefix.length > 0;
+}
+
 export function getCommandArgs(cmd: CommandRef): string[] {
 	return cmd.node.suffix.map((word) => word.value ?? word.text);
 }
