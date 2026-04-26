@@ -16,7 +16,7 @@
 		"type": "git",
 		"url": "git+https://github.com/jdiamond/pi-guard.git"
 	},
-	"homepage": "https://github.com/jdiamond/pi-guard#readme",
+	"homepage": "https://github.com/jdiamond/pi-guard",
 	"bugs": {
 		"url": "https://github.com/jdiamond/pi-guard/issues"
 	},

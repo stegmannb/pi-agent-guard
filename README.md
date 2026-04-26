@@ -1,16 +1,130 @@
 # pi-guard
 
-General-purpose permission system for pi tools. Handles permissions for bash and file tools (read/edit/write) with extensible matchers for custom tools.
+**Permission system for [pi](https://github.com/mariozechner/pi-coding-agent) tools**
 
-## Overview
+pi-guard intercepts tool calls and prompts for approval before executing potentially dangerous operations. It provides fine-grained, pattern-based permissions for bash commands, file access, and any custom tool — with sensible defaults that let you start safely.
 
-pi-guard intercepts tool calls and checks them against permission rules before execution.
+## Features
 
-**rules** define what's allowed. **matchers** define how to match tool calls to rules.
+- **Bash command matching** — Parses shell commands with an AST parser, handles pipes, subshells, wrapper commands (`sudo`, `xargs`, `bash -c`, `find -exec`), and supports glob tokens in rules
+- **Path matching** — Glob patterns for file read/write/edit permissions
+- **Extensible** — Add matchers for any tool with `exact`, `glob`, or `bash` matching
+- **Sensible defaults** — Reading is safe, writing is dangerous. Works out of the box
+- **Layered configuration** — Default → user → project → env → profile → session, last match wins
+- **Non-interactive support** — Denied commands are silently blocked in CI/CD; use `PI_GUARD` env var for automation
+- **Session rules** — "Always allow for this session" without modifying config files
 
-Built-in matchers for `bash`, `read`, `write`, and `edit`. Other tools can be guarded by configuring matchers in settings.
+## Examples
 
-## Installation
+When a tool call is covered by an `ask` rule, pi-guard intercepts it and prompts for approval. Commands get reformatted and abridged to make them easier to review. Allowed commands get ✔, unauthorized ones get ✖.
+
+When the agent runs:
+
+```bash
+rm -rf dist/
+```
+
+The prompt looks like:
+
+```
+⚠️ Unapproved Commands
+
+✖ rm -rf dist/
+
+→ Allow
+  Always allow rm (this session)
+  Reject
+```
+
+For commands with pipes and subshells, each sub-command is checked independently. When the agent runs:
+
+```bash
+TOKEN=$(curl -s https://api.example.com/token | jq -r .access_token) && \
+curl -H "Authorization: Bearer $TOKEN" https://api.example.com/data
+```
+
+The prompt looks like:
+
+```
+⚠️ Unapproved Commands
+
+✔ TOKEN=$(...) &&
+✖ curl -s https://api.example.com/token |
+✔ jq -r .access_token
+
+✖ curl -H "Authorization: Bearer $TOKEN" https://api.example.com/data
+
+→ Allow
+  Always allow curl (this session)
+  Reject
+```
+
+Wrapper commands (`xargs`, `find -exec`) are expanded — the wrapper gets ✔, the inner command is checked on its own line. When the agent runs:
+
+```bash
+grep -rl 'TODO' src/ | xargs sed --in-place 's/TODO/DONE/g'
+```
+
+The prompt looks like:
+
+```
+⚠️ Unapproved Commands
+
+✔ grep -rl 'TODO' src/ |
+✔ xargs ...
+✖ sed --in-place s/TODO/DONE/g
+
+→ Allow
+  Always allow sed (this session)
+  Reject
+```
+
+Or with `find -exec`:
+
+```bash
+find src/ -name '*.test.ts' -exec rm {} \;
+```
+
+The prompt looks like:
+
+```
+⚠️ Unapproved Commands
+
+✔ find src/ -name *.test.ts -exec ...
+✖ rm {}
+
+→ Allow
+  Always allow rm (this session)
+  Reject
+```
+
+For file operations, there's no command to parse — the prompt shows the path being accessed:
+
+```
+⚠️ Write Permission Required
+
+src/lib/config.ts
+
+→ Allow
+  Always allow write (this session)
+  Reject
+```
+
+For custom tools, the prompt shows the matched parameter value:
+
+```
+⚠️ web_fetch Permission Required
+
+https://api.github.com/repos/jdiamond/pi-guard/issues
+
+→ Allow
+  Always allow web_fetch (this session)
+  Reject
+```
+
+In non-interactive mode (e.g., CI), unauthorized commands are silently blocked without a prompt.
+
+## Install
 
 ```bash
 pi install npm:pi-guard
@@ -18,7 +132,7 @@ pi install npm:pi-guard
 
 ## Configuration
 
-Configure in `~/.pi/agent/settings.json`:
+Configure in `~/.pi/agent/settings.json` or `.pi/settings.json` (project-level):
 
 ```json
 {
@@ -60,16 +174,18 @@ Configure in `~/.pi/agent/settings.json`:
 ### Shorthand
 
 Disable all checks:
+
 ```json
 { "guard": { "enabled": false } }
 ```
 
 Whole-tool action (no pattern matching needed):
+
 ```json
 { "guard": { "rules": { "write": "allow" } } }
 ```
 
-### Environment Variable
+### Environment variable
 
 Set `PI_GUARD` to inject rules from outside (e.g., by pi-spawn or CI/CD):
 
@@ -89,21 +205,19 @@ Matchers define how to extract and match input from a tool call. Each matcher ha
 
 Tools without a matcher get simple allow/ask/deny for the whole tool.
 
-## Matching Algorithms
+### Bash matching
 
-### Bash (type: "bash")
+1. Parse the command with the unbash AST parser
+2. Extract all commands from the AST (handles pipes, subshells, command substitutions, process substitutions, heredocs, `if`/`while`/`for`/`case`, functions)
+3. Expand wrapper commands (`xargs rm` → `xargs` + `rm`, `sudo rm` → `sudo` + `rm`, `bash -c 'rm -rf /'` → `bash -c` + `rm`, `find -exec rm {} \;` → `find -exec` + `rm`)
+4. For each command, check rules using **subsequence matching** — rule tokens must appear in order, extra arguments are allowed
 
-1. Parse command with unbash AST parser
-2. Extract all commands from the AST
-3. Expand wrapper commands (e.g., `xargs rm` → `xargs` + `rm`, `sudo rm` → `sudo` + `rm`, `find -exec rm {} \;` → `find -exec` + `rm`, `bash -c 'rm -rf /'` → `bash -c` + `rm`)
-4. For each command, check rules using subsequence matching
-5. Tokens in rule must appear in order, extra arguments allowed
+> [!TIP]
+> `"git log"` matches `git log`, `git log --oneline`, and `git log --oneline -10`. This means you can allow a command without enumerating every flag combination.
 
-Example: `"git log"` matches `git log`, `git log --oneline`, `git log --oneline -10`
+#### Wildcard tokens in bash rules
 
-#### Wildcard tokens
-
-Tokens in a rule that contain `*` or `?` are matched as globs against the corresponding command argument, not as exact strings. This lets you match flag variants:
+Tokens containing `*` or `?` are matched as globs against the corresponding command argument:
 
 ```json
 "sed": "allow",
@@ -111,45 +225,43 @@ Tokens in a rule that contain `*` or `?` are matched as globs against the corres
 "sed --in-place*": "ask"
 ```
 
-| Command | Matches | Reason |
-|---------|---------|--------|
-| `sed -E 's/old/new/'` | `allow` | `sed` rule, no `-i` flag |
-| `sed -i 's/old/new/'` | `ask` | `-i` matches glob `-i*` |
-| `sed -i.bak 's/old/new/'` | `ask` | `-i.bak` matches glob `-i*` |
-| `sed --in-place 's/old/new/'` | `ask` | `--in-place` matches glob `--in-place*` |
+| Command | Result | Reason |
+|---------|--------|--------|
+| `sed -E 's/old/new/'` | allow | `sed` rule, no `-i` flag |
+| `sed -i 's/old/new/'` | ask | `-i` matches glob `-i*` |
+| `sed -i.bak 's/old/new/'` | ask | `-i.bak` matches glob `-i*` |
 
-This is only for `*`/`?` **inside** rule tokens. The bare `"*"` key is a catch-all for any command (see Rule Precedence).
+This only applies to `*`/`?` **inside** rule tokens. The bare `"*"` key is the catch-all for any command (see [Rule precedence](#rule-precedence)).
 
-#### Wrapper commands
+### Glob matching
 
-Commands like `xargs`, `sudo`, `bash -c`, `find -exec`, and `fd -x` embed sub-commands. pi-guard extracts and independently checks those sub-commands against rules. Nested wrappers are handled too — `sudo xargs rm` checks `rm` through both `sudo` and `xargs`.
-
-In approval prompts, the wrapper's sub-command is replaced with `...` to avoid duplication:
-
-```
-✔ xargs ...
-✖ rm
-```
-
-### Glob (type: "glob")
-
-Standard glob matching:
+Standard glob patterns:
 - `*` matches anything except `/`
 - `**` matches anything including `/`
-- `?` matches single character
+- `?` matches a single character
 - `~` expands to home directory
 
-### Exact (type: "exact")
+### Exact matching
 
 Simple string equality. Rule `"build"` only matches input `build`.
 
-## Rule Precedence
+## Actions
+
+Each permission rule resolves to one of:
+
+| Action | Behavior |
+|--------|----------|
+| `allow` | Run without approval |
+| `ask` | Prompt for approval (block in non-interactive mode) |
+| `deny` | Block the action |
+
+## Rule precedence
 
 ```
 default → user config → project config → env (PI_GUARD) → profile → session rules
 ```
 
-**Last match wins** within a tool's rules. Put catch-all `"*"` first, specific rules after:
+**Last match wins** within a tool's rules. Put the catch-all `"*"` first, specific rules after:
 
 ```json
 "bash": {
@@ -160,39 +272,25 @@ default → user config → project config → env (PI_GUARD) → profile → se
 }
 ```
 
-## Actions
+## Default rules
 
-Each permission rule resolves to one of:
-- `"allow"` — run without approval
-- `"ask"` — prompt for approval (or block in non-interactive mode)
-- `"deny"` — block the action
+See [src/defaults.ts](src/defaults.ts) for the built-in defaults.
 
-## Default Rules
+The defaults follow a simple principle: **reading is safe, writing is dangerous**. Read-only bash commands (`ls`, `cat`, `git log`, `grep`, etc.) are allowed, while anything that modifies state asks for approval. Note that `sed` is allowed by default, but `sed -i*` (in-place edit) is set to `ask` since it modifies files. File reads are mostly allowed except for sensitive patterns (`*.env`, `*.pem`). All edits and writes require approval.
 
-See [src/defaults.ts](src/defaults.ts) for the built-in default rules.
-
-The defaults follow a simple principle: **reading is safe, writing is dangerous**. Bash commands that only read (ls, cat, git log) are allowed, while anything that modifies state asks for approval. Note that `sed` is allowed by default, but `sed -i*` (in-place edit) is set to `ask` since it modifies files. File reads are mostly allowed except for sensitive patterns (*.env, *.pem). All edits and writes require approval since they change the codebase.
-
-To trust the agent with file modifications (useful in containers or trusted environments), allow all edits and writes:
-
-```json
-{
-  "guard": {
-    "rules": {
-      "edit": "allow",
-      "write": "allow"
-    }
-  }
-}
-```
+> [!TIP]
+> To trust the agent with file modifications (useful in containers or trusted environments):
+> ```json
+> {
+>   "guard": {
+>     "rules": { "edit": "allow", "write": "allow" }
+>   }
+> }
+> ```
 
 ## Profiles
 
-Profiles let you define named rule overlays that can be activated during a session. This is useful for switching between permission modes without editing config. Only one profile can be active at a time — activating a new one replaces the previous.
-
-Profiles are layered between env (`PI_GUARD`) and session rules in the precedence chain. Rules are merged in layer order with last-match-wins semantics, so a profile with `"*": "allow"` will override any specific rules from earlier layers (like `"rm": "deny"`) — `"*"` always matches last and wins.
-
-For example, define a profile that allows writes so you can switch to it when you want to make changes:
+Profiles let you define named rule overlays and switch between them during a session. Only one profile can be active at a time.
 
 ```json
 {
@@ -207,19 +305,14 @@ For example, define a profile that allows writes so you can switch to it when yo
 }
 ```
 
-Activate it with `/guard profile read-write` and deactivate with `/guard profile off`.
+Activate with `/guard profile read-write`, deactivate with `/guard profile off`.
 
-### Profile Commands
-
-```
-/guard profile           # Show active profile and available profiles
-/guard profile <name>    # Activate a profile by name
-/guard profile off       # Deactivate current profile
-```
+> [!WARNING]
+> Profiles are layered between env and session rules. A profile with `"*": "allow"` will override specific rules from earlier layers (like `"rm": "deny"`) because `"*"` always matches last and wins.
 
 ### Shortcuts
 
-Shortcuts are custom commands that execute guard subcommands, so you don't have to type commands like `/guard profile read-write` every time:
+Define custom slash commands for quick access to guard actions:
 
 ```json
 {
@@ -240,26 +333,18 @@ Shortcuts are custom commands that execute guard subcommands, so you don't have 
 }
 ```
 
-Now `/rw` activates the read-write profile, `/ro` deactivates it, and `/yolo`/`/safe` quickly toggle the guard off and on.
+Now `/rw` activates the read-write profile, `/ro` deactivates it, and `/yolo`/`/safe` quickly toggle the guard.
 
 Shortcuts can reference any guard subcommand: `profile`, `list`, `toggle`, `enable`, or `disable`.
 
 ## Commands
 
-### `/guard`
-
-Manage pi-guard security settings.
-
-```
-/guard enable           # Enable guard
-/guard disable          # Disable guard
-/guard toggle           # Toggle guard on/off
-/guard list             # Show current rules
-/guard profile          # Show active profile and available profiles
-/guard profile <name>   # Activate a profile by name
-/guard profile off      # Deactivate current profile
-```
-
-## License
-
-MIT
+| Command | Description |
+|---------|-------------|
+| `/guard enable` | Enable guard |
+| `/guard disable` | Disable guard |
+| `/guard toggle` | Toggle guard on/off |
+| `/guard list` | Show current rules by provenance layer |
+| `/guard profile` | Show active profile and available profiles |
+| `/guard profile <name>` | Activate a profile |
+| `/guard profile off` | Deactivate current profile |
