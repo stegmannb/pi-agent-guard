@@ -124,11 +124,11 @@ test("validateLoadedGuardConfig", async (t) => {
 		assert.ok(result.warning);
 	});
 
-	await t.test("recovers valid enabled when rules is invalid", () => {
+	await t.test("returns safe fallback when rules is invalid", () => {
 		const result = validateLoadedGuardConfig({ enabled: false, rules: 42 });
-		assert.equal(result.config.enabled, false);
+		assert.equal(result.config.enabled, true);
 		assert.deepEqual(result.config.rules, {});
-		assert.ok(result.warning?.includes("rules"));
+		assert.ok(result.warning);
 	});
 
 	await t.test("accepts valid profiles", () => {
@@ -176,13 +176,14 @@ test("validateLoadedGuardConfig", async (t) => {
 		assert.equal(result.warning, undefined);
 	});
 
-	await t.test("rejects invalid profiles with invalid action", () => {
+	await t.test("returns safe fallback for invalid profiles", () => {
 		const result = validateLoadedGuardConfig({
 			profiles: {
 				bad: { edit: { "*": "maybe" } },
 			},
 		});
-		assert.ok(result.warning?.includes("maybe"));
+		assert.equal(result.config.profiles, undefined);
+		assert.ok(result.warning);
 	});
 });
 

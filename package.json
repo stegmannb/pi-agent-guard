@@ -45,13 +45,15 @@
 		"unbash": "^3.0.0"
 	},
 	"peerDependencies": {
-		"@mariozechner/pi-coding-agent": "*"
+		"@mariozechner/pi-coding-agent": "*",
+		"typebox": "*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.11",
 		"@mariozechner/pi-coding-agent": "*",
 		"@types/minimatch": "^5.1.2",
 		"@types/node": "^25",
+		"typebox": "1.1.28",
 		"typescript": "^5.8"
 	}
 }
