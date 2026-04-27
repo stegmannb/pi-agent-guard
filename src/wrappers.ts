@@ -180,38 +180,22 @@ function scanPassthroughBoundary(
 		const arg = args[i];
 		if (arg === undefined) break;
 
-		if (skipVarAssignments && /^[A-Za-z_][A-Za-z0-9_]*=/.test(arg)) {
+		if (skipVarAssignments && isVarAssignment(arg)) {
 			i++;
 			continue;
 		}
 
 		if (!arg.startsWith("-")) break;
 
-		if (arg.includes("=")) {
+		const span = flagSpan(arg, i, args, flagArgs);
+		if (
+			span === 2 &&
+			skipVarAssignments &&
+			isVarAssignment(args[i + 1] ?? "")
+		) {
 			i++;
-			continue;
-		}
-
-		// Combined short flag with value: -n1
-		if (arg.length > 2 && !arg.startsWith("--")) {
-			const flagPrefix = arg.slice(0, 2);
-			if (takesValue(flagPrefix, flagArgs)) {
-				i++;
-				continue;
-			}
-		}
-
-		i++;
-		if (takesValue(arg, flagArgs) && i < args.length) {
-			// Skip the value arg, unless it looks like a flag or var assignment.
-			const nextArg = args[i];
-			if (
-				nextArg &&
-				!nextArg.startsWith("-") &&
-				!(skipVarAssignments && /^[A-Za-z_][A-Za-z0-9_]*=/.test(nextArg))
-			) {
-				i++;
-			}
+		} else {
+			i += span;
 		}
 	}
 	return i;
@@ -256,40 +240,15 @@ function extractFlag(
 
 		if (arg === targetFlag) {
 			const scriptArg = args[i + 1];
-			if (scriptArg) {
-				return parseSubCommandString(scriptArg, ctx);
-			}
-			return [];
+			return scriptArg ? parseSubCommandString(scriptArg, ctx) : [];
 		}
 
-		// Skip other flags that might consume values
 		if (arg?.startsWith("-")) {
-			if (arg.includes("=")) {
-				i++;
-				continue;
-			}
-
-			// Combined short flag with value
-			if (arg.length > 2 && !arg.startsWith("--")) {
-				const flagPrefix = arg.slice(0, 2);
-				if (takesValue(flagPrefix, flagArgs)) {
-					i++;
-					continue;
-				}
-			}
-
-			i++;
-			// Skip the value arg for flags that take one, unless it's our target flag
-			if (takesValue(arg, flagArgs) && i < args.length) {
-				const nextArg = args[i];
-				if (nextArg !== targetFlag) {
-					i++;
-				}
-			}
+			i += flagSpan(arg, i, args, flagArgs);
 			continue;
 		}
 
-		// Non-flag arg before our target flag — this is a positional argument.
+		// Non-flag arg before our target flag — positional argument.
 		// For bash, `bash script.sh` is non-wrapped usage; stop looking.
 		i++;
 	}
@@ -303,6 +262,24 @@ function extractFlag(
  *
  * Example: `find . -name '*.ts' -exec rm {} \;` → parse `rm {}`
  */
+/** Collect arguments between an exec keyword and its terminator. */
+function collectExecCommand(
+	args: string[],
+	startIdx: number,
+	terminators: string[] | null,
+): { parts: string[]; nextIdx: number } {
+	const parts: string[] = [];
+	let i = startIdx;
+	while (i < args.length) {
+		const part = args[i];
+		if (part === undefined) break;
+		if (terminators?.includes(part)) return { parts, nextIdx: i + 1 };
+		parts.push(part);
+		i++;
+	}
+	return { parts, nextIdx: i };
+}
+
 function extractExec(
 	cmd: CommandRef,
 	keywords: string[],
@@ -317,20 +294,10 @@ function extractExec(
 		const arg = args[i];
 		if (arg === undefined) break;
 		if (keywords.includes(arg)) {
-			i++;
-			const cmdParts: string[] = [];
-			while (i < args.length) {
-				const part = args[i];
-				if (part === undefined) break;
-				if (terminators?.includes(part)) {
-					i++;
-					break;
-				}
-				cmdParts.push(part);
-				i++;
-			}
-			if (cmdParts.length > 0) {
-				results.push(...parseSubCommandString(cmdParts.join(" "), ctx));
+			const { parts, nextIdx } = collectExecCommand(args, i + 1, terminators);
+			i = nextIdx;
+			if (parts.length > 0) {
+				results.push(...parseSubCommandString(parts.join(" "), ctx));
 			}
 			continue;
 		}
@@ -368,6 +335,37 @@ function takesValue(flag: string, flagArgs?: string[]): boolean {
 
 	const stripped = flag.replace(/^-+/, "");
 	return flagArgs.some((fa) => fa.replace(/^-+/, "") === stripped);
+}
+
+/** Check whether an argument is a NAME=VALUE variable assignment. */
+function isVarAssignment(arg: string): boolean {
+	return /^[A-Za-z_][A-Za-z0-9_]*=/.test(arg);
+}
+
+/**
+ * Returns how many argument positions the flag at args[i] consumes.
+ * Returns 2 when the flag takes a separate value argument and the
+ * next arg does not itself look like a flag.
+ */
+function flagSpan(
+	arg: string,
+	i: number,
+	args: string[],
+	flagArgs?: string[],
+): number {
+	if (arg.includes("=")) return 1;
+	// Combined short flag with value: -n1
+	if (
+		arg.length > 2 &&
+		!arg.startsWith("--") &&
+		takesValue(arg.slice(0, 2), flagArgs)
+	)
+		return 1;
+	if (takesValue(arg, flagArgs) && i + 1 < args.length) {
+		const next = args[i + 1];
+		if (next && !next.startsWith("-")) return 2;
+	}
+	return 1;
 }
 
 /**
@@ -412,54 +410,31 @@ function formatFlagDisplay(
 	args: string[],
 	spec: { flag: string; flagArgs?: string[] },
 ): string {
-	const displayParts: string[] = [name];
+	const parts: string[] = [name];
 
 	let i = 0;
 	while (i < args.length) {
 		const arg = args[i];
 
 		if (arg === spec.flag) {
-			displayParts.push(arg);
-			displayParts.push("...");
-			return displayParts.join(" ");
+			parts.push(arg, "...");
+			return parts.join(" ");
 		}
 
 		if (arg?.startsWith("-")) {
-			if (arg.includes("=")) {
-				displayParts.push(arg);
-				i++;
-				continue;
-			}
-
-			// Combined short flag with value
-			if (arg.length > 2 && !arg.startsWith("--")) {
-				const flagPrefix = arg.slice(0, 2);
-				if (takesValue(flagPrefix, spec.flagArgs)) {
-					displayParts.push(arg);
-					i++;
-					continue;
-				}
-			}
-
-			displayParts.push(arg);
-			i++;
-			if (takesValue(arg, spec.flagArgs) && i < args.length) {
-				const nextArg = args[i];
-				if (nextArg !== undefined && nextArg !== spec.flag) {
-					displayParts.push(nextArg);
-					i++;
-				}
-			}
+			const span = flagSpan(arg, i, args, spec.flagArgs);
+			for (let j = 0; j < span; j++) parts.push(args[i + j] ?? "");
+			i += span;
 			continue;
 		}
 
 		// Non-flag arg before target flag — positional arg
-		displayParts.push(arg ?? "");
+		parts.push(arg ?? "");
 		i++;
 	}
 
 	// Never found the target flag — no sub-command to elide
-	return displayParts.join(" ");
+	return parts.join(" ");
 }
 
 function formatExecDisplay(

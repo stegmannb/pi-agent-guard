@@ -139,20 +139,17 @@ export function buildEffectiveRules(
 	profileRules: Rules | undefined,
 	sessionRules: Rules,
 ): Rules {
-	// Handle the case where rules is a single action (applies to all tools)
-	// Last match wins: session > profile > env > project > user
-	if (
-		typeof userRules === "string" ||
-		typeof projectRules === "string" ||
-		typeof sessionRules === "string" ||
-		typeof envRules === "string" ||
-		typeof profileRules === "string"
-	) {
-		if (typeof sessionRules === "string") return sessionRules;
-		if (typeof profileRules === "string") return profileRules;
-		if (typeof envRules === "string") return envRules;
-		if (typeof projectRules === "string") return projectRules;
-		if (typeof userRules === "string") return userRules;
+	const layers = [
+		userRules,
+		projectRules,
+		envRules,
+		profileRules,
+		sessionRules,
+	];
+
+	// If any layer is a single-action string, last one wins
+	for (let i = layers.length - 1; i >= 0; i--) {
+		if (typeof layers[i] === "string") return layers[i] as Action;
 	}
 
 	// Merge object-based rules
@@ -161,13 +158,7 @@ export function buildEffectiveRules(
 	const merged: Record<string, ToolRules> = { ...defaultRules };
 
 	// Layer order: default → user → project → env → profile → session
-	for (const layer of [
-		userRules,
-		projectRules,
-		envRules,
-		profileRules,
-		sessionRules,
-	]) {
+	for (const layer of layers) {
 		if (!layer || typeof layer === "string") continue;
 		for (const [tool, rules] of Object.entries(layer)) {
 			if (typeof rules === "string") {

@@ -69,7 +69,37 @@ function collectNode(
 	ctx: ExtractCtx,
 ) {
 	if (!node) return;
+	const t = node.type;
+	if (
+		t === "Script" ||
+		t === "CompoundList" ||
+		t === "Pipeline" ||
+		t === "AndOr"
+	) {
+		collectCompoundOrChain(node, source, commands, groupId, ctx);
+		return;
+	}
+	if (
+		t === "If" ||
+		t === "While" ||
+		t === "For" ||
+		t === "Select" ||
+		t === "Case"
+	) {
+		collectControlFlow(node, source, commands, groupId, ctx);
+		return;
+	}
+	collectRemaining(node, source, commands, groupId, ctx);
+}
 
+/** Handle Script, CompoundList, Pipeline, and AndOr node types. */
+function collectCompoundOrChain(
+	node: Script | Node,
+	source: string,
+	commands: CommandRef[],
+	groupId: number,
+	ctx: ExtractCtx,
+) {
 	switch (node.type) {
 		case "Script":
 		case "CompoundList": {
@@ -77,14 +107,12 @@ function collectNode(
 				const startIdx = commands.length;
 				collectNode(child, source, commands, groupId, ctx);
 				const joinerTarget = findLastInGroup(commands, groupId, startIdx);
-				// Set ; joiner on last command from each child except the last
 				if (i < node.commands.length - 1 && joinerTarget) {
 					joinerTarget.joiner = ";";
 				}
 			}
 			return;
 		}
-
 		case "Pipeline":
 		case "AndOr": {
 			for (const [i, child] of node.commands.entries()) {
@@ -92,30 +120,24 @@ function collectNode(
 				collectNode(child, source, commands, groupId, ctx);
 				const joinerTarget = findLastInGroup(commands, groupId, startIdx);
 				const op = node.operators[i];
-				// Set operator joiner on last command from each child
 				if (op !== undefined && joinerTarget) {
 					joinerTarget.joiner = op as "|" | "&&" | "||";
 				}
 			}
 			return;
 		}
+	}
+}
 
-		case "Statement":
-			collectNode(node.command, source, commands, groupId, ctx);
-			for (const redirect of node.redirects) {
-				collectRedirect(redirect, source, commands, groupId, ctx);
-			}
-			return;
-
-		case "Command":
-			collectCommand(node, source, commands, groupId, ctx);
-			return;
-
-		case "Subshell":
-		case "BraceGroup":
-			collectNode(node.body, source, commands, groupId, ctx);
-			return;
-
+/** Handle If, While, For, Select, and Case node types. */
+function collectControlFlow(
+	node: Script | Node,
+	source: string,
+	commands: CommandRef[],
+	groupId: number,
+	ctx: ExtractCtx,
+) {
+	switch (node.type) {
 		case "If":
 			collectNode(node.clause, source, commands, groupId, ctx);
 			collectNode(node.then, source, commands, groupId, ctx);
@@ -148,6 +170,34 @@ function collectNode(
 			for (const item of node.items) {
 				collectCaseItem(item, source, commands, groupId, ctx);
 			}
+			return;
+	}
+}
+
+/** Handle remaining node types: Statement, Command, Subshell, BraceGroup,
+ *  Function, Coproc, TestCommand, ArithmeticFor, ArithmeticCommand. */
+function collectRemaining(
+	node: Script | Node,
+	source: string,
+	commands: CommandRef[],
+	groupId: number,
+	ctx: ExtractCtx,
+) {
+	switch (node.type) {
+		case "Statement":
+			collectNode(node.command, source, commands, groupId, ctx);
+			for (const redirect of node.redirects) {
+				collectRedirect(redirect, source, commands, groupId, ctx);
+			}
+			return;
+
+		case "Command":
+			collectCommand(node, source, commands, groupId, ctx);
+			return;
+
+		case "Subshell":
+		case "BraceGroup":
+			collectNode(node.body, source, commands, groupId, ctx);
 			return;
 
 		case "Function":

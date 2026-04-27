@@ -67,27 +67,7 @@ export async function handleBashTool(
 	try {
 		ast = parseBash(rawCmd);
 	} catch {
-		if (!ctx.hasUI) {
-			return {
-				block: true,
-				reason: `[Blocked by pi-guard: Failed to parse command safely]`,
-			};
-		}
-
-		pi.events.emit("nudge", { body: "Command needs approval" });
-		const confirmed = await ctx.ui.confirm(
-			"⚠️ Could Not Parse Command Safely",
-			"\nAllow anyway?",
-		);
-
-		if (!confirmed) {
-			return {
-				block: true,
-				reason: `[Blocked by pi-guard: User rejected this invocation]`,
-			};
-		}
-
-		return;
+		return handleBashParseFailure(pi, ctx);
 	}
 
 	const { commands: allCommands, expandedWrappers } = expandWrapperCommands(
@@ -95,46 +75,92 @@ export async function handleBashTool(
 	);
 	if (allCommands.length === 0) return;
 
-	const unauthorizedCommands: CommandRef[] = [];
-
-	for (const cmd of allCommands) {
-		// Bare assignments (e.g. TOKEN=$(...)) are not real commands —
-		// they're just variable assignments. The commands inside $(...) are
-		// checked separately, so the assignment itself is always allowed.
-		if (isBareAssignment(cmd)) continue;
-
-		const name = getCommandName(cmd);
-		const args = getCommandArgs(cmd);
-		const action = resolveBashAction(name, args, toolRules);
-		if (action !== "allow") {
-			unauthorizedCommands.push(cmd);
-		}
-	}
-
+	const unauthorizedCommands = findUnauthorizedCommands(allCommands, toolRules);
 	if (unauthorizedCommands.length === 0) return;
 
+	if (!ctx.hasUI)
+		return handleNonInteractiveBash(unauthorizedCommands, toolRules);
+
+	return handleInteractiveBash(
+		pi,
+		tool,
+		allCommands,
+		unauthorizedCommands,
+		expandedWrappers,
+		ctx,
+		sessionRules,
+	);
+}
+
+async function handleBashParseFailure(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+): Promise<{ block: true; reason: string } | undefined> {
 	if (!ctx.hasUI) {
-		// Non-interactive: check first unauthorized command's action
-		const firstCmd = unauthorizedCommands[0];
-		if (!firstCmd) return;
-		const name = getCommandName(firstCmd);
-		const args = getCommandArgs(firstCmd);
-		const action = resolveBashAction(name, args, toolRules);
-
-		if (action === "deny") {
-			return {
-				block: true,
-				reason: `[Blocked by pi-guard: Security policy]`,
-			};
-		}
-
 		return {
 			block: true,
-			reason: `[Blocked by pi-guard: No interactive session available]`,
+			reason: `[Blocked by pi-guard: Failed to parse command safely]`,
 		};
 	}
 
-	// Interactive: prompt user
+	pi.events.emit("nudge", { body: "Command needs approval" });
+	const confirmed = await ctx.ui.confirm(
+		"⚠️ Could Not Parse Command Safely",
+		"\nAllow anyway?",
+	);
+
+	if (!confirmed) {
+		return {
+			block: true,
+			reason: `[Blocked by pi-guard: User rejected this invocation]`,
+		};
+	}
+}
+
+function findUnauthorizedCommands(
+	allCommands: CommandRef[],
+	toolRules: Record<string, Action>,
+): CommandRef[] {
+	const unauthorized: CommandRef[] = [];
+	for (const cmd of allCommands) {
+		if (isBareAssignment(cmd)) continue;
+		const name = getCommandName(cmd);
+		const args = getCommandArgs(cmd);
+		if (resolveBashAction(name, args, toolRules) !== "allow") {
+			unauthorized.push(cmd);
+		}
+	}
+	return unauthorized;
+}
+
+function handleNonInteractiveBash(
+	unauthorizedCommands: CommandRef[],
+	toolRules: Record<string, Action>,
+): { block: true; reason: string } | undefined {
+	const firstCmd = unauthorizedCommands[0];
+	if (!firstCmd) return;
+	const name = getCommandName(firstCmd);
+	const args = getCommandArgs(firstCmd);
+	const action = resolveBashAction(name, args, toolRules);
+
+	if (action === "deny") {
+		return { block: true, reason: `[Blocked by pi-guard: Security policy]` };
+	}
+	return {
+		block: true,
+		reason: `[Blocked by pi-guard: No interactive session available]`,
+	};
+}
+
+async function handleInteractiveBash(
+	pi: ExtensionAPI,
+	tool: string,
+	allCommands: CommandRef[],
+	unauthorizedCommands: CommandRef[],
+	expandedWrappers: Set<CommandRef>,
+	ctx: ExtensionContext,
+	sessionRules: Record<string, Record<string, Action>>,
+): Promise<{ block: true; reason: string } | undefined> {
 	const uniqueBaseNames = Array.from(
 		new Set(unauthorizedCommands.map(getCommandName)),
 	);

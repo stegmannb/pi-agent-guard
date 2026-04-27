@@ -1,4 +1,7 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@mariozechner/pi-coding-agent";
 import type { GuardContext } from "./commands.ts";
 import { handleGuardCommand, parseGuardArgs } from "./commands.ts";
 import {
@@ -12,7 +15,7 @@ import {
 	handleGlobTool,
 	handleInteractiveApproval,
 } from "./handlers.ts";
-import type { Action, Rules, ToolCallInput } from "./types.ts";
+import type { Action, Matchers, Rules, ToolCallInput } from "./types.ts";
 
 const block = (reason: string): { block: true; reason: string } => ({
 	block: true,
@@ -20,6 +23,109 @@ const block = (reason: string): { block: true; reason: string } => ({
 });
 
 export { parseGuardArgs };
+
+function getEffectiveRulesForEvent(
+	userRules: Rules,
+	projectRules: Rules,
+	envRules: Rules | undefined,
+	context: GuardContext,
+): Rules {
+	const profiles = context.config.profiles ?? {};
+	const profileRules = context.activeProfile
+		? profiles[context.activeProfile]
+		: undefined;
+	return buildEffectiveRules(
+		userRules,
+		projectRules,
+		envRules,
+		profileRules,
+		context.sessionRules,
+	);
+}
+
+async function handleToolCall(
+	pi: ExtensionAPI,
+	tool: string,
+	input: ToolCallInput,
+	effectiveRules: Rules,
+	ctx: ExtensionContext,
+	context: GuardContext,
+): Promise<{ block: true; reason: string } | undefined> {
+	const toolRules =
+		typeof effectiveRules === "object" ? effectiveRules[tool] : effectiveRules;
+
+	let action: Action = "ask";
+	if (typeof toolRules !== "object") {
+		action = toolRules ?? "ask";
+	} else {
+		return handleMatchedTool(pi, tool, input, toolRules, ctx, context);
+	}
+
+	return applyToolAction(pi, tool, input, action, ctx, context.sessionRules);
+}
+
+async function handleMatchedTool(
+	pi: ExtensionAPI,
+	tool: string,
+	input: ToolCallInput,
+	toolRules: Record<string, Action>,
+	ctx: ExtensionContext,
+	context: GuardContext,
+): Promise<{ block: true; reason: string } | undefined> {
+	const matchers: Matchers | undefined = context.config.matchers;
+	const matcher = matchers?.[tool];
+	if (!matcher) {
+		const action = toolRules["*"] ?? "ask";
+		return applyToolAction(pi, tool, input, action, ctx, context.sessionRules);
+	}
+
+	const value = input[matcher.param];
+	if (typeof value !== "string" || value.trim() === "") return;
+
+	switch (matcher.type) {
+		case "bash":
+			return handleBashTool(
+				pi,
+				tool,
+				value,
+				toolRules,
+				ctx,
+				context.sessionRules,
+			);
+		case "glob":
+			return handleGlobTool(
+				pi,
+				tool,
+				value,
+				toolRules,
+				ctx,
+				context.sessionRules,
+			);
+		case "exact":
+			return handleExactTool(
+				pi,
+				tool,
+				value,
+				toolRules,
+				ctx,
+				context.sessionRules,
+			);
+	}
+}
+
+async function applyToolAction(
+	pi: ExtensionAPI,
+	tool: string,
+	input: ToolCallInput,
+	action: Action,
+	ctx: ExtensionContext,
+	sessionRules: Record<string, Record<string, Action>>,
+): Promise<{ block: true; reason: string } | undefined> {
+	if (action === "allow") return;
+	if (action === "deny") return block("Security policy");
+	if (!ctx.hasUI) return block("No interactive session available");
+	return handleInteractiveApproval(pi, tool, input, ctx, sessionRules);
+}
 
 export default function (pi: ExtensionAPI) {
 	// Load all static config once at startup
@@ -72,78 +178,20 @@ export default function (pi: ExtensionAPI) {
 	pi.on("tool_call", async (event, ctx) => {
 		if (!context.config.enabled) return;
 
-		const tool = event.toolName;
-		const input = event.input as ToolCallInput;
-
-		const profiles = context.config.profiles ?? {};
-		const profileRules = context.activeProfile
-			? profiles[context.activeProfile]
-			: undefined;
-		const effectiveRules = buildEffectiveRules(
+		const effectiveRules = getEffectiveRulesForEvent(
 			userRules,
 			projectRules,
 			envRules,
-			profileRules,
-			context.sessionRules,
+			context,
 		);
 
-		// Collapse global action and per-tool action into one value:
-		// - string effectiveRules → that action applies to all tools
-		// - object effectiveRules → look up tool, undefined means "ask"
-		const toolRules =
-			typeof effectiveRules === "object"
-				? effectiveRules[tool]
-				: effectiveRules;
-
-		let action: Action = "ask";
-		if (typeof toolRules !== "object") {
-			action = toolRules ?? "ask";
-		} else {
-			const matcher = context.config.matchers?.[tool];
-			if (matcher) {
-				const value = input[matcher.param];
-				if (typeof value !== "string" || value.trim() === "") return;
-				if (matcher.type === "bash")
-					return handleBashTool(
-						pi,
-						tool,
-						value,
-						toolRules,
-						ctx,
-						context.sessionRules,
-					);
-				if (matcher.type === "glob")
-					return handleGlobTool(
-						pi,
-						tool,
-						value,
-						toolRules,
-						ctx,
-						context.sessionRules,
-					);
-				if (matcher.type === "exact")
-					return handleExactTool(
-						pi,
-						tool,
-						value,
-						toolRules,
-						ctx,
-						context.sessionRules,
-					);
-			} else {
-				action = toolRules["*"] ?? "ask";
-			}
-		}
-
-		if (action === "allow") return;
-		if (action === "deny") return block("Security policy");
-		if (!ctx.hasUI) return block("No interactive session available");
-		return handleInteractiveApproval(
+		return handleToolCall(
 			pi,
-			tool,
-			input,
+			event.toolName,
+			event.input as ToolCallInput,
+			effectiveRules,
 			ctx,
-			context.sessionRules,
+			context,
 		);
 	});
 }
