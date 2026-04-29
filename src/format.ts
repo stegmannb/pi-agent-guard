@@ -225,12 +225,27 @@ function elideToken(token: string, argMaxLength: number): string {
 	return token;
 }
 
-function shrinkToken(token: string, targetLength: number, min: string): string {
-	if (token.length <= targetLength) return token;
-	if (targetLength <= min.length) return min;
+/**
+ * A display token with pre-computed bounds for the shrinker.
+ *
+ * full — the longest the token will ever be shown (used when the command fits)
+ * min  — the shortest it can be truncated to (elided form, floor for shrinker)
+ *
+ * We carry both instead of computing min on demand because heredocs have a
+ * structurally different minimum (renderElidedHeredoc) that can't be derived
+ * from full alone. Pre-computing keeps the shrinker uniform.
+ */
+interface TokenSpec {
+	full: string;
+	min: string;
+}
+
+function shrinkToken(spec: TokenSpec, targetLength: number): string {
+	if (spec.full.length <= targetLength) return spec.full;
+	if (targetLength <= spec.min.length) return spec.min;
 	if (targetLength <= 1) return "…";
-	if (isPathToken(token)) return shrinkPathToken(token, targetLength);
-	return truncate(token, targetLength);
+	if (isPathToken(spec.full)) return shrinkPathToken(spec.full, targetLength);
+	return truncate(spec.full, targetLength);
 }
 
 /**
@@ -241,7 +256,7 @@ function shrinkToken(token: string, targetLength: number, min: string): string {
  */
 function shrinkTokens(
 	head: string[],
-	tokenSpecs: { full: string; min: string }[],
+	tokenSpecs: TokenSpec[],
 	fullDisplay: string,
 	maxLength: number,
 ): string {
@@ -256,7 +271,7 @@ function shrinkTokens(
 		if (maxShrink <= 0) continue;
 
 		const nextTargetLength = current.length - Math.min(maxShrink, overflow);
-		const shrunk = shrinkToken(spec.full, nextTargetLength, spec.min);
+		const shrunk = shrinkToken(spec, nextTargetLength);
 		tokens[i] = shrunk;
 		overflow -= current.length - shrunk.length;
 	}
