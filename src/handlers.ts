@@ -25,7 +25,6 @@ export async function handleInteractiveApproval(
 	ctx: ExtensionContext,
 	sessionRules: Record<string, Record<string, Action>>,
 ): Promise<{ block: true; reason: string } | undefined> {
-	// Build appropriate prompt based on tool
 	const value = String(
 		input[
 			tool === "bash"
@@ -35,24 +34,14 @@ export async function handleInteractiveApproval(
 					: (Object.keys(input)[0] ?? "input")
 		],
 	);
-	const prompt = buildCustomApprovalPrompt(tool, value);
-
-	pi.events.emit("nudge", { body: `${tool} needs approval` });
-
-	const alwaysLabel = `Always allow ${tool} (this session)`;
-	const choice = await ctx.ui.select(prompt, ["Allow", alwaysLabel, "Reject"]);
-
-	if (choice === alwaysLabel) {
-		sessionRules[tool] = { ...sessionRules[tool], "*": "allow" };
-		return;
-	}
-
-	if (choice !== "Allow") {
-		return {
-			block: true,
-			reason: `[Blocked by pi-guard: User rejected this invocation]`,
-		};
-	}
+	return handleToolApproval(
+		pi,
+		tool,
+		"ask",
+		ctx,
+		sessionRules,
+		buildCustomApprovalPrompt(tool, value),
+	);
 }
 
 export async function handleBashTool(
