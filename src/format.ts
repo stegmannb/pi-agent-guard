@@ -55,15 +55,7 @@ export function formatCommand(
 			);
 			return { full, min: elideToken(full, argMaxLength) };
 		}),
-		...cmd.node.redirects.map((redirect) => {
-			if (isRenderableHeredoc(redirect)) {
-				const full = renderFullHeredoc(redirect, cmd.source);
-				const min = renderElidedHeredoc(redirect, cmd.source, argMaxLength);
-				return { full, min };
-			}
-			const full = renderRedirect(redirect, cmd.source).replace(/\n/g, "↵");
-			return { full, min: elideToken(full, argMaxLength) };
-		}),
+		...redirectsToTokenSpecs(cmd.node.redirects, cmd.source, argMaxLength),
 	];
 
 	const fullDisplay = [name, ...tokenSpecs.map((spec) => spec.full)].join(" ");
@@ -77,6 +69,22 @@ function isRenderableHeredoc(redirect: Redirect): boolean {
 		(redirect.operator === "<<" || redirect.operator === "<<-") &&
 		redirect.content != null
 	);
+}
+
+function redirectsToTokenSpecs(
+	redirects: Redirect[],
+	source: string,
+	argMaxLength: number,
+): { full: string; min: string }[] {
+	return redirects.map((redirect) => {
+		if (isRenderableHeredoc(redirect)) {
+			const full = renderFullHeredoc(redirect, source);
+			const min = renderElidedHeredoc(redirect, source, argMaxLength);
+			return { full, min };
+		}
+		const full = renderRedirect(redirect, source).replace(/\n/g, "↵");
+		return { full, min: elideToken(full, argMaxLength) };
+	});
 }
 
 function renderRedirect(redirect: Redirect, source: string): string {
@@ -299,15 +307,7 @@ function formatAssignmentOnlyCommand(
 	const assignments = cmd.node.prefix.map((a) =>
 		formatAssignment(a, cmd.source).replace(/\n/g, "↵"),
 	);
-	const tokenSpecs = cmd.node.redirects.map((redirect) => {
-		if (isRenderableHeredoc(redirect)) {
-			const full = renderFullHeredoc(redirect, cmd.source);
-			const min = renderElidedHeredoc(redirect, cmd.source, argMaxLength);
-			return { full, min };
-		}
-		const full = renderRedirect(redirect, cmd.source).replace(/\n/g, "↵");
-		return { full, min: elideToken(full, argMaxLength) };
-	});
+	const tokenSpecs = redirectsToTokenSpecs(cmd.node.redirects, cmd.source, argMaxLength);
 
 	const fullDisplay = [
 		...assignments,
