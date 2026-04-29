@@ -132,6 +132,63 @@ export function getGuardConfigFromSettings(input: unknown): LoadedConfigResult {
 
 // ── Rule merging ──
 
+/**
+ * If any layer is a blanket string action ("allow"/"deny"/"ask"),
+ * the last such layer wins and short-circuits all rule merging.
+ */
+function findBlanketAction(layers: (Rules | undefined)[]): Action | undefined {
+	for (let i = layers.length - 1; i >= 0; i--) {
+		const layer = layers[i];
+		if (typeof layer === "string") return layer;
+	}
+	return undefined;
+}
+
+function isRecordRules(
+	rules: Rules | undefined,
+): rules is Record<string, ToolRules> {
+	return rules != null && typeof rules === "object";
+}
+
+function getBaseRules(): Record<string, ToolRules> {
+	// DEFAULT_CONFIG.rules is always an object (see defaults.ts), but
+	// the type includes `Action` so we narrow it here.
+	return { ...(DEFAULT_CONFIG.rules as Record<string, ToolRules>) };
+}
+
+/**
+ * Merge a single layer's rules into the accumulated result.
+ *
+ * Uses spread merging so that later layers can add pattern-level
+ * entries without replacing the entire tool.  When a prior layer
+ * set a bare string action for a tool, the object rules from this
+ * layer replace it entirely (rather than spreading the string).
+ */
+function mergeLayerRules(
+	merged: Record<string, ToolRules>,
+	layer: Rules | undefined,
+): void {
+	if (!isRecordRules(layer)) return;
+
+	for (const [tool, rules] of Object.entries(layer)) {
+		if (typeof rules === "string") {
+			merged[tool] = rules;
+		} else {
+			const existing = merged[tool];
+			const base =
+				existing != null && typeof existing === "object" ? existing : {};
+			merged[tool] = { ...base, ...rules };
+		}
+	}
+}
+
+/**
+ * Build the effective rules by merging all layers in precedence order.
+ *
+ * Layers (last match wins): default → user → project → env → profile → session.
+ * If any layer is a blanket string action, it short-circuits and wins.
+ * Otherwise, all object layers are merged from lowest to highest precedence.
+ */
 export function buildEffectiveRules(
 	userRules: Rules,
 	projectRules: Rules,
@@ -147,29 +204,12 @@ export function buildEffectiveRules(
 		sessionRules,
 	];
 
-	// If any layer is a single-action string, last one wins
-	for (let i = layers.length - 1; i >= 0; i--) {
-		if (typeof layers[i] === "string") return layers[i] as Action;
-	}
+	const blanket = findBlanketAction(layers);
+	if (blanket !== undefined) return blanket;
 
-	// Merge object-based rules
-	const defaultRules =
-		typeof DEFAULT_CONFIG.rules === "string" ? {} : DEFAULT_CONFIG.rules;
-	const merged: Record<string, ToolRules> = { ...defaultRules };
-
-	// Layer order: default → user → project → env → profile → session
+	const merged = getBaseRules();
 	for (const layer of layers) {
-		if (!layer || typeof layer === "string") continue;
-		for (const [tool, rules] of Object.entries(layer)) {
-			if (typeof rules === "string") {
-				merged[tool] = rules;
-			} else {
-				merged[tool] = {
-					...(merged[tool] as Record<string, Action>),
-					...rules,
-				};
-			}
-		}
+		mergeLayerRules(merged, layer);
 	}
 
 	return merged;
