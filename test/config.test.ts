@@ -318,4 +318,27 @@ test("buildEffectiveRules", async (t) => {
 			assert.deepEqual(result.edit, { "*": "ask" });
 		}
 	});
+
+	await t.test(
+		"higher layer object rules replace lower layer string action for the same tool",
+		() => {
+			// Regression: spreading a string action (e.g. { ..."deny", ...rules })
+			// would inject character-index garbage keys (0→d, 1→e, etc.).
+			const result = buildEffectiveRules(
+				{ bash: "deny" },
+				{ bash: { "git push": "allow" } },
+				undefined,
+				undefined,
+				{},
+			);
+			assert.ok(typeof result === "object");
+			if (typeof result === "object") {
+				const bash = result.bash;
+				assert.ok(typeof bash === "object");
+				if (typeof bash === "object") {
+					assert.deepEqual(bash, { "git push": "allow" });
+				}
+			}
+		},
+	);
 });
