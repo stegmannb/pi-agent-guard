@@ -77,25 +77,13 @@ export const DEFAULT_CONFIG = {
 			xargs: "allow",
 			yq: "allow",
 		},
-		read: {
-			"*": "allow",
-			"**/*.env": "deny",
-			"**/*.pem": "deny",
-		},
-		write: {
-			"*": "ask",
-		},
-		edit: {
-			"*": "ask",
-		},
-		grep: {
-			"*": "allow",
-		},
-		find: {
-			"*": "allow",
-		},
-		ls: {
-			"*": "allow",
-		},
+		// File tools are handled by pi-sandbox; guard defers to it by default.
+		// Users without sandbox can override these in their settings.json.
+		read: "allow",
+		write: "allow",
+		edit: "allow",
+		grep: "allow",
+		find: "allow",
+		ls: "allow",
 	},
 } as const satisfies GuardConfig;

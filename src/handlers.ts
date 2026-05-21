@@ -3,6 +3,12 @@ import type {
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { parse as parseBash, type Script } from "unbash";
+import {
+	GLOBAL_SETTINGS_PATH,
+	getProjectSettingsPath,
+	isConfigWritable,
+	saveRule,
+} from "./config.ts";
 import { extractAllCommandsFromAST } from "./extract.ts";
 import {
 	resolveBashAction,
@@ -155,6 +161,17 @@ async function handleInteractiveBash(
 	);
 	const alwaysLabel = `Always allow ${uniqueBaseNames.join(", ")} (this session)`;
 
+	const projectPath = getProjectSettingsPath(ctx.cwd);
+	const globalWritable = isConfigWritable(GLOBAL_SETTINGS_PATH);
+
+	const choices = [
+		"Allow",
+		alwaysLabel,
+		"Allow for this project  \u2192  .pi/settings.json",
+		...(globalWritable ? ["Allow globally  \u2192  settings.json"] : []),
+		"Reject",
+	];
+
 	pi.events.emit("nudge", { body: "Command needs approval" });
 	const choice = await ctx.ui.select(
 		buildApprovalPrompt(
@@ -163,12 +180,30 @@ async function handleInteractiveBash(
 			undefined,
 			expandedWrappers,
 		),
-		["Allow", alwaysLabel, "Reject"],
+		choices,
 	);
 
 	if (choice === alwaysLabel) {
 		sessionRules[tool] = sessionRules[tool] ?? {};
 		for (const name of uniqueBaseNames) {
+			sessionRules[tool][name] = "allow";
+		}
+		return;
+	}
+
+	if (choice?.startsWith("Allow for this project")) {
+		sessionRules[tool] = sessionRules[tool] ?? {};
+		for (const name of uniqueBaseNames) {
+			saveRule(projectPath, tool, name, "allow");
+			sessionRules[tool][name] = "allow";
+		}
+		return;
+	}
+
+	if (globalWritable && choice?.startsWith("Allow globally")) {
+		sessionRules[tool] = sessionRules[tool] ?? {};
+		for (const name of uniqueBaseNames) {
+			saveRule(GLOBAL_SETTINGS_PATH, tool, name, "allow");
 			sessionRules[tool][name] = "allow";
 		}
 		return;

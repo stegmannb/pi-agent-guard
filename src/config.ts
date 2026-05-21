@@ -11,6 +11,78 @@ import type { Action, GuardConfig, Rules, ToolRules } from "./types.ts";
 const AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
 const SETTINGS_PATH = path.join(AGENT_DIR, "settings.json");
 
+/** Absolute path to the global pi agent settings file. */
+export const GLOBAL_SETTINGS_PATH = SETTINGS_PATH;
+
+/** Absolute path to the project-level settings file for the given working directory. */
+export function getProjectSettingsPath(cwd: string): string {
+	return path.join(cwd, ".pi", "settings.json");
+}
+
+/**
+ * Returns true if filePath is writable by the current process.
+ * If the file does not yet exist, checks whether its parent directory is writable.
+ * Used to detect read-only configs (e.g. Nix-store symlinks) and hide the
+ * "Allow globally" option when it would always fail.
+ */
+export function isConfigWritable(filePath: string): boolean {
+	if (fs.existsSync(filePath)) {
+		try {
+			fs.accessSync(filePath, fs.constants.W_OK);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+	try {
+		fs.accessSync(path.dirname(filePath), fs.constants.W_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Surgically add a single rule to a settings.json file under guard.rules.<tool>.<commandName>.
+ * Creates the file if it does not yet exist. Preserves all other existing settings.
+ */
+export function saveRule(
+	configPath: string,
+	tool: string,
+	commandName: string,
+	action: Action,
+): void {
+	try {
+		fs.mkdirSync(path.dirname(configPath), { recursive: true });
+
+		let settings: Record<string, unknown> = {};
+		if (fs.existsSync(configPath)) {
+			settings = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+		}
+
+		const guard = (settings.guard ?? {}) as Record<string, unknown>;
+		const rules = (guard.rules ?? {}) as Record<string, unknown>;
+		const toolRules = (
+			typeof rules[tool] === "object" && rules[tool] !== null
+				? rules[tool]
+				: {}
+		) as Record<string, Action>;
+
+		toolRules[commandName] = action;
+		rules[tool] = toolRules;
+		guard.rules = rules;
+		settings.guard = guard;
+
+		fs.writeFileSync(
+			configPath,
+			JSON.stringify(settings, null, 2) + "\n",
+			"utf-8",
+		);
+	} catch (e) {
+		console.error(`[pi-guard] Failed to save rule to ${configPath}`, e);
+	}
+}
+
 export const SAFE_FALLBACK_CONFIG: GuardConfig = {
 	enabled: true,
 	matchers: DEFAULT_CONFIG.matchers,
