@@ -1,2 +1,6 @@
 node_modules/
 *.tsbuildinfo
+.devenv*/
+.devenv.flake.nix
+.direnv/
+.pi
