@@ -150,6 +150,30 @@ export default function (pi: ExtensionAPI) {
 		sessionRules: {},
 	};
 
+	// ── Status helper ──────────────────────────────────────────────────────────
+
+	function updateGuardStatus(ctx: ExtensionContext): void {
+		const effectiveRules = getEffectiveRulesForEvent(
+			userRules,
+			projectRules,
+			envRules,
+			context,
+		);
+		const enabled = context.sessionEnabled ?? context.config.enabled;
+		if (!enabled) {
+			ctx.ui.setStatus("guard", "🛡️ Guard: off");
+		} else {
+			const count =
+				typeof effectiveRules === "string"
+					? 1
+					: Object.keys(effectiveRules).length;
+			ctx.ui.setStatus(
+				"guard",
+				ctx.ui.theme.fg("accent", `🛡️ Guard: on · ${count} rules`),
+			);
+		}
+	}
+
 	// Register shortcut commands
 	const shortcuts = context.config.shortcuts ?? {};
 	for (const [shortcut, subcommand] of Object.entries(shortcuts)) {
@@ -160,6 +184,7 @@ export default function (pi: ExtensionAPI) {
 				const { action, target } = parseGuardArgs(subcommand);
 				const result = handleGuardCommand(action, target, context, ctx.cwd);
 				ctx.ui.notify(result.message, result.type);
+				updateGuardStatus(ctx);
 			},
 		});
 	}
@@ -171,12 +196,18 @@ export default function (pi: ExtensionAPI) {
 			const { action, target } = parseGuardArgs(args);
 			const result = handleGuardCommand(action, target, context, ctx.cwd);
 			ctx.ui.notify(result.message, result.type);
+			updateGuardStatus(ctx);
 		},
+	});
+
+	// Set initial status bar entry
+	pi.on("session_start", async (_event, ctx) => {
+		updateGuardStatus(ctx);
 	});
 
 	// The core interception hook
 	pi.on("tool_call", async (event, ctx) => {
-		if (!context.config.enabled) return;
+		if (!(context.sessionEnabled ?? context.config.enabled)) return;
 
 		const effectiveRules = getEffectiveRulesForEvent(
 			userRules,

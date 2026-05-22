@@ -1,10 +1,12 @@
-import { DEFAULT_CONFIG, loadProjectConfig, saveConfig } from "./config.ts";
+import { DEFAULT_CONFIG, loadProjectConfig } from "./config.ts";
 import type { Action, GuardConfig, Rules } from "./types.ts";
 
 export interface GuardContext {
 	config: GuardConfig;
 	activeProfile: string | undefined;
 	sessionRules: Record<string, Record<string, Action>>;
+	/** Session-only enabled override — undefined means use config value */
+	sessionEnabled?: boolean;
 }
 
 export function parseGuardArgs(args: string): {
@@ -58,21 +60,20 @@ function handleProfileCommand(
 }
 
 function handleToggleCommand(context: GuardContext): string {
-	context.config.enabled = !context.config.enabled;
-	saveConfig(context.config);
-	return `pi-guard is now ${context.config.enabled ? "ENABLED" : "DISABLED"}`;
+	const current = context.sessionEnabled ?? context.config.enabled;
+	context.sessionEnabled = !current;
+	const state = context.sessionEnabled ? "ENABLED" : "DISABLED";
+	return `pi-guard is now ${state} (session only)`;
 }
 
 function handleEnableCommand(context: GuardContext): string {
-	context.config.enabled = true;
-	saveConfig(context.config);
-	return "pi-guard is now ENABLED";
+	context.sessionEnabled = true;
+	return "pi-guard is now ENABLED (session only)";
 }
 
 function handleDisableCommand(context: GuardContext): string {
-	context.config.enabled = false;
-	saveConfig(context.config);
-	return "pi-guard is now DISABLED";
+	context.sessionEnabled = false;
+	return "pi-guard is now DISABLED (session only)";
 }
 
 function formatLayer(
@@ -108,7 +109,7 @@ function formatLayer(
 }
 
 function buildListOutput(context: GuardContext, cwd: string): string {
-	const enabled = context.config.enabled ? "ENABLED" : "DISABLED";
+	const enabled = (context.sessionEnabled ?? context.config.enabled) ? "ENABLED" : "DISABLED";
 	let output = `pi-guard: ${enabled}\n`;
 	if (context.activeProfile) {
 		output += `Profile: ${context.activeProfile}\n`;
