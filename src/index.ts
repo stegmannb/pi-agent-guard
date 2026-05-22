@@ -169,7 +169,7 @@ export default function (pi: ExtensionAPI) {
 					: Object.keys(effectiveRules).length;
 			ctx.ui.setStatus(
 				"guard",
-				ctx.ui.theme.fg("accent", `🛡️ Guard: on · ${count} rules`),
+				ctx.ui.theme.fg("accent", `🛡️ Guard: ${count} rules`),
 			);
 		}
 	}
