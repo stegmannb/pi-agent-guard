@@ -36,8 +36,8 @@ stdenv.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
 
-    mkdir -p "$out"
-    cp -r . "$out/"
+    mkdir -p "$out/guard"
+    cp -r . "$out/guard/"
 
     runHook postInstall
   '';
