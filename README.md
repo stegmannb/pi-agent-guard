@@ -326,24 +326,21 @@ Define custom slash commands for quick access to guard actions:
     "shortcuts": {
       "rw": "profile read-write",
       "ro": "profile off",
-      "yolo": "disable",
-      "safe": "enable"
+      "gt": "toggle"
     }
   }
 }
 ```
 
-Now `/rw` activates the read-write profile, `/ro` deactivates it, and `/yolo`/`/safe` quickly toggle the guard.
+Now `/rw` activates the read-write profile, `/ro` deactivates it, and `/gt` toggles the guard.
 
-Shortcuts can reference any guard subcommand: `profile`, `list`, `toggle`, `enable`, or `disable`.
+Shortcuts can reference any guard subcommand: `profile`, `list`, or `toggle`.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/guard enable` | Enable guard |
-| `/guard disable` | Disable guard |
-| `/guard toggle` | Toggle guard on/off |
+| `/guard-toggle` | Toggle guard on/off for this session |
 | `/guard list` | Show current rules by provenance layer |
 | `/guard profile` | Show active profile and available profiles |
 | `/guard profile <name>` | Activate a profile |

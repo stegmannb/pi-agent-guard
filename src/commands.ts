@@ -66,16 +66,6 @@ function handleToggleCommand(context: GuardContext): string {
 	return `pi-guard is now ${state} (session only)`;
 }
 
-function handleEnableCommand(context: GuardContext): string {
-	context.sessionEnabled = true;
-	return "pi-guard is now ENABLED (session only)";
-}
-
-function handleDisableCommand(context: GuardContext): string {
-	context.sessionEnabled = false;
-	return "pi-guard is now DISABLED (session only)";
-}
-
 function formatLayer(
 	label: string,
 	rules: Rules | undefined,
@@ -169,18 +159,6 @@ export function handleGuardCommand(
 	context: GuardContext,
 	cwd: string,
 ): { message: string; type: "info" | "warning" } {
-	if (action === "toggle") {
-		return { message: handleToggleCommand(context), type: "info" };
-	}
-
-	if (action === "enable") {
-		return { message: handleEnableCommand(context), type: "info" };
-	}
-
-	if (action === "disable") {
-		return { message: handleDisableCommand(context), type: "info" };
-	}
-
 	if (action === "profile") {
 		return handleProfileCommand(context, target);
 	}
@@ -190,7 +168,7 @@ export function handleGuardCommand(
 	}
 
 	return {
-		message: "Usage: /guard <toggle|enable|disable|profile|list>",
+		message: "Usage: /guard <profile|list>",
 		type: "warning",
 	};
 }

@@ -200,6 +200,15 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerCommand("guard-toggle", {
+		description: "Toggle pi-guard on/off for this session",
+		handler: async (_args, ctx) => {
+			const result = handleGuardCommand("toggle", undefined, context, ctx.cwd);
+			ctx.ui.notify(result.message, result.type);
+			updateGuardStatus(ctx);
+		},
+	});
+
 	// Set initial status bar entry
 	pi.on("session_start", async (_event, ctx) => {
 		updateGuardStatus(ctx);
