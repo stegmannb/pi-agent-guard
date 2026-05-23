@@ -4,3 +4,4 @@ node_modules/
 .devenv.flake.nix
 .direnv/
 .pi
+result
