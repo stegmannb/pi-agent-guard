@@ -294,6 +294,8 @@ test("WRAPPER_COMMANDS registry", async (t) => {
 			"nohup",
 			"env",
 			"strace",
+			"nix",
+			"direnv",
 			"bash",
 			"sh",
 			"zsh",
@@ -316,6 +318,8 @@ test("WRAPPER_COMMANDS registry", async (t) => {
 			"nohup",
 			"env",
 			"strace",
+			"nix",
+			"direnv",
 		];
 		for (const cmd of passthroughCommands) {
 			assert.equal(
@@ -472,6 +476,66 @@ test("formatWrapperDisplay", async (t) => {
 			"fd . -e ts",
 		);
 	});
+
+	// ── nix (separator --) ─────────────────────────────────────────────────
+
+	await t.test("nix run ... -- cmd — extracts sub-command after --", () => {
+		const result = expand("nix run nixpkgs#nodejs -- node -e hi");
+		assert.deepEqual(result, [
+			{ name: "nix", args: ["run", "nixpkgs#nodejs", "--", "node", "-e", "hi"] },
+			{ name: "node", args: ["-e", "hi"] },
+		]);
+	});
+
+	await t.test("nix shell ... -- cmd — extracts sub-command after --", () => {
+		const result = expand("nix shell nixpkgs#cowsay -- cowsay hello");
+		assert.deepEqual(result, [
+			{ name: "nix", args: ["shell", "nixpkgs#cowsay", "--", "cowsay", "hello"] },
+			{ name: "cowsay", args: ["hello"] },
+		]);
+	});
+
+	await t.test("nix without -- — no sub-command extracted", () => {
+		const result = expand("nix run nixpkgs#hello");
+		assert.equal(result.length, 1);
+		assert.deepEqual(result[0], { name: "nix", args: ["run", "nixpkgs#hello"] });
+	});
+
+	await t.test("nix run ... -- cmd — formatWrapperDisplay", () => {
+		assert.equal(
+			formatWrapperDisplay(
+				findCmd("nix run nixpkgs#nodejs -- node -e 'hi'", "nix"),
+			),
+			"nix run nixpkgs#nodejs -- ...",
+		);
+	});
+
+	// ── direnv (skipArgs: 2) ────────────────────────────────────────────────
+
+	await t.test("direnv exec . cmd — extracts sub-command", () => {
+		const result = expand("direnv exec . npx tsc --noEmit");
+		assert.deepEqual(result, [
+			{ name: "direnv", args: ["exec", ".", "npx", "tsc", "--noEmit"] },
+			{ name: "npx", args: ["tsc", "--noEmit"] },
+		]);
+	});
+
+	await t.test("direnv allow — no sub-command (subcommand is allow)", () => {
+		// allow is not exec, but skipArgs still applies — "allow" is the first
+		// positional, we skip 2 args. No args left → no sub-command extracted.
+		const result = expand("direnv allow");
+		assert.equal(result.length, 1);
+		assert.deepEqual(result[0], { name: "direnv", args: ["allow"] });
+	});
+
+	await t.test("direnv exec . cmd — formatWrapperDisplay", () => {
+		assert.equal(
+			formatWrapperDisplay(
+				findCmd("direnv exec . npx tsc --noEmit", "direnv"),
+			),
+			"direnv exec . ...",
+		);
+	});
 });
 
 test("wrapper expansion + rule resolution", async (t) => {
@@ -570,6 +634,42 @@ test("wrapper expansion + rule resolution", async (t) => {
 	await t.test("no wrapper — regular command rules still work", () => {
 		const rules = { "*": "ask", ls: "allow" } as const;
 		const unauthorized = resolveUnauthorized("ls -la", rules);
+		assert.deepEqual(unauthorized, []);
+	});
+
+	await t.test("nix run ... -- node — nix is ask, node is ask", () => {
+		const rules = { "*": "ask" } as const;
+		const unauthorized = resolveUnauthorized(
+			"nix run nixpkgs#nodejs -- node -e hi",
+			rules,
+		);
+		assert.deepEqual(unauthorized, ["nix", "node"]);
+	});
+
+	await t.test("nix run ... -- node — both allowed", () => {
+		const rules = { "*": "ask", nix: "allow", node: "allow" } as const;
+		const unauthorized = resolveUnauthorized(
+			"nix run nixpkgs#nodejs -- node -e hi",
+			rules,
+		);
+		assert.deepEqual(unauthorized, []);
+	});
+
+	await t.test("direnv exec . npx — direnv is ask, npx is ask", () => {
+		const rules = { "*": "ask" } as const;
+		const unauthorized = resolveUnauthorized(
+			"direnv exec . npx tsc --noEmit",
+			rules,
+		);
+		assert.deepEqual(unauthorized, ["direnv", "npx"]);
+	});
+
+	await t.test("direnv exec . npx — both allowed", () => {
+		const rules = { "*": "ask", direnv: "allow", npx: "allow" } as const;
+		const unauthorized = resolveUnauthorized(
+			"direnv exec . npx tsc --noEmit",
+			rules,
+		);
 		assert.deepEqual(unauthorized, []);
 	});
 });

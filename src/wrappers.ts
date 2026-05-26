@@ -23,7 +23,7 @@ import type { CommandRef } from "./types.ts";
  *   Example: fd . -e ts -x rm {}    (keywords: ["-x", "--exec", "-X", "--exec-batch"], terminators: null)
  */
 export type WrapperSpec =
-	| { type: "passthrough"; flagArgs?: string[]; skipVarAssignments?: boolean }
+	| { type: "passthrough"; flagArgs?: string[]; skipVarAssignments?: boolean; separator?: string; skipArgs?: number }
 	| { type: "flag"; flag: string; flagArgs?: string[] }
 	| { type: "exec"; keywords: string[]; terminators: string[] | null };
 
@@ -68,6 +68,10 @@ export const WRAPPER_COMMANDS: Record<string, WrapperSpec> = {
 		type: "passthrough",
 		flagArgs: ["-o", "-O", "-p", "-S", "-e", "-E"],
 	},
+	// nix run ... -- cmd, nix shell ... -- cmd (-- separates nix args from command)
+	nix: { type: "passthrough", separator: "--" },
+	// direnv exec [DIR] COMMAND [...] — skip "exec" subcommand + directory arg
+	direnv: { type: "passthrough", skipArgs: 2 },
 	bash: {
 		type: "flag",
 		flag: "-c",
@@ -151,6 +155,8 @@ function extractSubCommands(
 				cmd,
 				spec.flagArgs,
 				spec.skipVarAssignments ?? false,
+				spec.separator,
+				spec.skipArgs,
 				ctx,
 			);
 		case "flag":
@@ -169,12 +175,25 @@ function extractSubCommands(
  * 2. Flags with separate values: -n 1, -u root
  * 3. Long flags with values: --rcfile=file, --rcfile file
  * 4. NAME=VALUE var assignments (for env and similar)
+ * 5. Separator token: everything after `--` is the sub-command
+ * 6. skipArgs: skip a fixed number of positional args after flags
  */
 function scanPassthroughBoundary(
 	args: string[],
 	flagArgs?: string[],
 	skipVarAssignments = false,
+	separator?: string,
+	skipArgs?: number,
 ): number {
+	// If a separator is configured, scan for it first. Everything after
+	// the separator is the sub-command (even if it looks like flags).
+	// If the separator is not found, there is no sub-command to extract.
+	if (separator) {
+		const sepIdx = args.indexOf(separator);
+		if (sepIdx >= 0) return sepIdx + 1;
+		return args.length;
+	}
+
 	let i = 0;
 	while (i < args.length) {
 		const arg = args[i];
@@ -198,6 +217,14 @@ function scanPassthroughBoundary(
 			i += span;
 		}
 	}
+
+	// After skipping flags, also skip a fixed number of positional args.
+	// Used for commands like `direnv exec DIR cmd...` where the subcommand
+	// and directory are positional arguments before the sub-command.
+	if (skipArgs) {
+		i = Math.min(i + skipArgs, args.length);
+	}
+
 	return i;
 }
 
@@ -212,10 +239,12 @@ function extractPassthrough(
 	cmd: CommandRef,
 	flagArgs?: string[],
 	skipVarAssignments = false,
+	separator?: string,
+	skipArgs?: number,
 	ctx?: ExtractCtx,
 ): CommandRef[] {
 	const args = getCommandArgs(cmd);
-	const i = scanPassthroughBoundary(args, flagArgs, skipVarAssignments);
+	const i = scanPassthroughBoundary(args, flagArgs, skipVarAssignments, separator, skipArgs);
 	if (i >= args.length) return [];
 	return parseSubCommandString(args.slice(i).join(" "), ctx);
 }
@@ -395,12 +424,14 @@ export function formatWrapperDisplay(cmd: CommandRef): string {
 function formatPassthroughDisplay(
 	name: string,
 	args: string[],
-	spec: { flagArgs?: string[]; skipVarAssignments?: boolean },
+	spec: { flagArgs?: string[]; skipVarAssignments?: boolean; separator?: string; skipArgs?: number },
 ): string {
 	const i = scanPassthroughBoundary(
 		args,
 		spec.flagArgs,
 		spec.skipVarAssignments,
+		spec.separator,
+		spec.skipArgs,
 	);
 	return [name, ...args.slice(0, i), "..."].join(" ");
 }
