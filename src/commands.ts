@@ -167,8 +167,12 @@ export function handleGuardCommand(
 		return { message: buildListOutput(context, cwd), type: "info" };
 	}
 
+	if (action === "toggle") {
+		return { message: handleToggleCommand(context), type: "info" };
+	}
+
 	return {
-		message: "Usage: /guard <profile|list>",
+		message: "Usage: /guard <profile|list|toggle>",
 		type: "warning",
 	};
 }
