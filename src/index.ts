@@ -54,9 +54,9 @@ async function handleToolCall(
 	const toolRules =
 		typeof effectiveRules === "object" ? effectiveRules[tool] : effectiveRules;
 
-	let action: Action = "ask";
+	let action: Action = "allow";
 	if (typeof toolRules !== "object") {
-		action = toolRules ?? "ask";
+		action = toolRules ?? "allow";
 	} else {
 		return handleMatchedTool(pi, tool, input, toolRules, ctx, context);
 	}
@@ -75,7 +75,7 @@ async function handleMatchedTool(
 	const matchers: Matchers | undefined = context.config.matchers;
 	const matcher = matchers?.[tool];
 	if (!matcher) {
-		const action = toolRules["*"] ?? "ask";
+		const action = toolRules["*"] ?? "allow";
 		return applyToolAction(pi, tool, input, action, ctx, context.sessionRules);
 	}
 
