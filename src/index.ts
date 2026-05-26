@@ -163,13 +163,19 @@ export default function (pi: ExtensionAPI) {
 		if (!enabled) {
 			ctx.ui.setStatus("guard", "🛡️ Guard: off");
 		} else {
+			// Count bash sub-rules (the meaningful number);
+			// file tools are handled by pi-sandbox and don't need counting.
+			const bashRules =
+				typeof effectiveRules === "object" ? effectiveRules["bash"] : undefined;
 			const count =
-				typeof effectiveRules === "string"
-					? 1
-					: Object.keys(effectiveRules).length;
+				typeof bashRules === "object"
+					? Object.keys(bashRules).length
+					: typeof effectiveRules === "string"
+						? 1
+						: Object.keys(effectiveRules).length;
 			ctx.ui.setStatus(
 				"guard",
-				ctx.ui.theme.fg("accent", `🛡️ Guard: ${count} rules`),
+				ctx.ui.theme.fg("accent", `🛡️ Guard: on · ${count} bash rules`),
 			);
 		}
 	}
