@@ -161,7 +161,7 @@ export default function (pi: ExtensionAPI) {
 		);
 		const enabled = context.sessionEnabled ?? context.config.enabled;
 		if (!enabled) {
-			ctx.ui.setStatus("guard", "🛡️ Guard: off");
+			ctx.ui.setStatus("guard", "⚠️ Guard: off");
 		} else {
 			// Count bash sub-rules (the meaningful number);
 			// file tools are handled by pi-sandbox and don't need counting.
