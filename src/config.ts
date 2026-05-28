@@ -8,7 +8,8 @@ import type { Action, GuardConfig, Rules, ToolRules } from "./types.ts";
 
 // ── Constants ──
 
-const AGENT_DIR = path.join(os.homedir(), ".pi", "agent");
+const AGENT_DIR =
+	process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".pi", "agent");
 const SETTINGS_PATH = path.join(AGENT_DIR, "settings.json");
 
 /** Absolute path to the global pi agent settings file. */

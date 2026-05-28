@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as path from "node:path";
 import { test } from "node:test";
 import {
 	buildEffectiveRules,
@@ -7,6 +8,25 @@ import {
 	validateToolRules,
 } from "../src/config.ts";
 import { DEFAULT_CONFIG } from "../src/defaults.ts";
+
+test("GLOBAL_SETTINGS_PATH respects PI_CODING_AGENT_DIR", async () => {
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	const customDir = path.join(process.cwd(), ".tmp", "pi-config-test");
+	process.env.PI_CODING_AGENT_DIR = customDir;
+	try {
+		const module = await import(`../src/config.ts?config-dir=${Date.now()}`);
+		assert.equal(
+			module.GLOBAL_SETTINGS_PATH,
+			path.join(customDir, "settings.json"),
+		);
+	} finally {
+		if (previous === undefined) {
+			delete process.env.PI_CODING_AGENT_DIR;
+		} else {
+			process.env.PI_CODING_AGENT_DIR = previous;
+		}
+	}
+});
 
 test("validateToolRules", async (t) => {
 	await t.test("accepts valid rules", () => {

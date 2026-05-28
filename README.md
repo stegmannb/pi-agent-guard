@@ -132,7 +132,7 @@ pi install npm:pi-guard
 
 ## Configuration
 
-Configure in `~/.pi/agent/settings.json` or `.pi/settings.json` (project-level):
+Configure in `$PI_CODING_AGENT_DIR/settings.json` (defaults to `~/.pi/agent/settings.json`) or `.pi/settings.json` (project-level):
 
 ```json
 {
