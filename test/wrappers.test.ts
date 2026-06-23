@@ -528,6 +528,23 @@ test("formatWrapperDisplay", async (t) => {
 		assert.deepEqual(result[0], { name: "direnv", args: ["allow"] });
 	});
 
+	await t.test("direnv exec . -- cmd — strips double-dash separator", () => {
+		const result = expand("direnv exec . -- kustomize version");
+		assert.deepEqual(result, [
+			{ name: "direnv", args: ["exec", ".", "--", "kustomize", "version"] },
+			{ name: "kustomize", args: ["version"] },
+		]);
+	});
+
+	await t.test("direnv exec . -- cmd — formatWrapperDisplay includes separator", () => {
+		assert.equal(
+			formatWrapperDisplay(
+				findCmd("direnv exec . -- kustomize version", "direnv"),
+			),
+			"direnv exec . -- ...",
+		);
+	});
+
 	await t.test("direnv exec . cmd — formatWrapperDisplay", () => {
 		assert.equal(
 			formatWrapperDisplay(
@@ -671,5 +688,23 @@ test("wrapper expansion + rule resolution", async (t) => {
 			rules,
 		);
 		assert.deepEqual(unauthorized, []);
+	});
+
+	await t.test("direnv exec . -- kustomize — with double-dash, both allowed", () => {
+		const rules = { "*": "ask", direnv: "allow", kustomize: "allow" } as const;
+		const unauthorized = resolveUnauthorized(
+			"direnv exec . -- kustomize version",
+			rules,
+		);
+		assert.deepEqual(unauthorized, []);
+	});
+
+	await t.test("direnv exec . -- kustomize — kustomize unapproved", () => {
+		const rules = { "*": "ask", direnv: "allow" } as const;
+		const unauthorized = resolveUnauthorized(
+			"direnv exec . -- kustomize version",
+			rules,
+		);
+		assert.deepEqual(unauthorized, ["kustomize"]);
 	});
 });

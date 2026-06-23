@@ -225,6 +225,13 @@ function scanPassthroughBoundary(
 		i = Math.min(i + skipArgs, args.length);
 	}
 
+	// Strip an optional `--` end-of-options separator. This is common when
+	// callers want to ensure the remaining arguments are not interpreted as
+	// flags by the wrapper (e.g. `direnv exec . -- kustomize version`).
+	if (args[i] === "--") {
+		i++;
+	}
+
 	return i;
 }
 
