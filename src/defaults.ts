@@ -20,8 +20,6 @@ export const DEFAULT_CONFIG = {
 			column: "allow",
 			cut: "allow",
 			date: "allow",
-			devbox: "allow",
-			devenv: "allow",
 			direnv: "allow",
 			dirname: "allow",
 			echo: "allow",
