@@ -72,6 +72,10 @@ export const WRAPPER_COMMANDS: Record<string, WrapperSpec> = {
 	nix: { type: "passthrough", separator: "--" },
 	// direnv exec [DIR] COMMAND [...] — skip "exec" subcommand + directory arg
 	direnv: { type: "passthrough", skipArgs: 2 },
+	// devbox shellenv -c "cmd" — the -c flag's value is parsed as a shell script
+	devbox: { type: "flag", flag: "-c" },
+	// devenv shell -- cmd args — everything after -- is the sub-command
+	devenv: { type: "passthrough", separator: "--" },
 	bash: {
 		type: "flag",
 		flag: "-c",
