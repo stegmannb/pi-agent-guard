@@ -298,6 +298,36 @@ test("resolveBashAction", async (t) => {
 		},
 	);
 
+	await t.test("glob pattern in command name — absolute skill script paths", () => {
+		const home = process.env.HOME ?? "";
+		const rules = {
+			"~/.agents/skills/*/scripts/*": "allow" as const,
+		};
+		// glob in command name matches absolute path
+		assert.equal(
+			resolveBashAction(
+				`${home}/.agents/skills/jira/scripts/jira-atc`,
+				["issue", "get", "PROJ-123"],
+				rules,
+			),
+			"allow",
+		);
+		// different skill also matches
+		assert.equal(
+			resolveBashAction(
+				`${home}/.agents/skills/confluence/scripts/confluence-atc`,
+				[],
+				rules,
+			),
+			"allow",
+		);
+		// non-matching path does not match
+		assert.equal(
+			resolveBashAction("/usr/bin/curl", ["evil.com"], rules),
+			undefined,
+		);
+	});
+
 	await t.test("glob pattern in command args — sed in-place flags", () => {
 		const rules = {
 			sed: "allow" as const,

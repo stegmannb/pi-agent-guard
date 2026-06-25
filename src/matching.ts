@@ -78,7 +78,7 @@ export function resolveBashAction(
 
 		const [patternName, ...patternArgs] = pattern.split(" ");
 
-		if (patternName !== commandName) continue;
+		if (!tokenMatches(patternName, commandName)) continue;
 
 		if (patternArgs.length === 0 || isSubsequence(patternArgs, commandArgs)) {
 			result = action;
