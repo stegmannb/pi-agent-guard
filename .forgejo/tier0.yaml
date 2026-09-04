@@ -1,0 +1,37 @@
+schema: 1
+tier: 0
+releaseProfile: none
+securityBoundary: command-policy-and-bypass-guard
+role: canonical command-permission safety boundary for agent tool execution
+owner: Bastian
+defaultBranch: main
+policy: docs/forgejo-tier-0.md
+requiredChecks:
+  - ci / policy (pull_request)
+  - ci / typecheck (pull_request)
+  - ci / lint (pull_request)
+  - ci / format (pull_request)
+  - ci / test (pull_request)
+forgejoRelease:
+  enabled: false
+  declarations: forbidden
+  tags: forbidden
+  forgejoReleases: forbidden
+  packages: forbidden
+  publishCredentials: forbidden
+externalReleaseBoundary:
+  platform: GitHub
+  workflow: .github/workflows/publish.yml
+  registry: npm
+  forgejoExecution: forbidden
+  taskScope: unchanged
+protectionAudit:
+  method: forgejo-owner-api-and-ui
+  verifiedAt: 2026-09-29T07:42:24+02:00
+  verifiedBy: stegmannb
+  evidence: Owner-authorized API readback passed; main blocks direct/admin pushes, requires six checks and current Reviewers approval; only Owners merge via rebase/fast-forward; all tags have an empty allowlist; Releases and Packages disabled. See HL-0197.
+  reviewDate: "2026-09-30"
+  triggers:
+    - forgejo-upgrade
+    - protection-setting-change
+ownerApplyTask: HL-0081

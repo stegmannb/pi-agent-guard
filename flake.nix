@@ -58,11 +58,33 @@
         system:
         let
           extension = extensionFor system;
+          pkgs = import nixpkgs { inherit system; };
+          pythonWithYaml = pkgs.python3.withPackages (pythonPackages: [ pythonPackages.pyyaml ]);
         in
         {
           default = extension;
           pi-guard = extension;
           biome-ci = (import nixpkgs { inherit system; }).callPackage ./nix/biome-ci.nix { };
+          node-tools = pkgs.buildEnv {
+            name = "pi-agent-guard-node-tools";
+            paths = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.nodejs_22
+              pkgs.pnpm_10
+            ];
+          };
+          policy-tools = pkgs.buildEnv {
+            name = "pi-agent-guard-policy-tools";
+            paths = [
+              pkgs.actionlint
+              pkgs.bash
+              pkgs.git
+              pkgs.ruff
+              pkgs.shellcheck
+              pythonWithYaml
+            ];
+          };
         }
         // lib.optionalAttrs (builtins.elem system runnerSystems) {
           pi = piFor system;

@@ -1,0 +1,23 @@
+* @Bastian/Reviewers
+
+/.forgejo/ @Bastian/Reviewers
+/.github/actionlint.yaml @Bastian/Reviewers
+/.github/workflows/publish.yml @Bastian/Reviewers
+/CODEOWNERS @Bastian/Reviewers
+/AGENTS.md @Bastian/Reviewers
+/docs/forgejo-tier-0.md @Bastian/Reviewers
+/flake.nix @Bastian/Reviewers
+/flake.lock @Bastian/Reviewers
+/.npmrc @Bastian/Reviewers
+/package.json @Bastian/Reviewers
+/package-lock.json @Bastian/Reviewers
+/pnpm-lock.yaml @Bastian/Reviewers
+/tsconfig.json @Bastian/Reviewers
+/biome.json @Bastian/Reviewers
+/index.ts @Bastian/Reviewers
+/src/ @Bastian/Reviewers
+/test/ @Bastian/Reviewers
+/nix/ @Bastian/Reviewers
+/scripts/ @Bastian/Reviewers
+/hack/ @Bastian/Reviewers
+/RELEASING.md @Bastian/Reviewers

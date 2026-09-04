@@ -5,3 +5,4 @@ node_modules/
 .direnv/
 .pi
 result
+__pycache__/

@@ -571,3 +571,10 @@ Shortcuts can reference any guard subcommand: `profile`, `list`, or `toggle`.
 Process hosts can verify the initialized Guard instance through the local
 `pasa:protection:snapshot:v1` event. See [the snapshot contract](docs/protection-snapshot.md)
 for file-backed replay, code provenance, child-worktree checks and refusal cases.
+
+## Development
+
+Run the complete local contract with `npm run verify`. Forgejo is the primary
+development repository; GitHub is a mirror. The Forgejo release profile is
+`none`. Required checks and the protection contract are documented in
+[docs/forgejo-tier-0.md](docs/forgejo-tier-0.md).
