@@ -2,239 +2,132 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
-import { parse as parseBash, type Script } from "unbash";
 import {
 	GLOBAL_SETTINGS_PATH,
 	getProjectSettingsPath,
 	isConfigWritable,
 	saveRule,
 } from "./config.ts";
-import { extractAllCommandsFromAST } from "./extract.ts";
-import {
-	resolveBashAction,
-	resolveExactAction,
-	resolveGlobAction,
-} from "./matching.ts";
+import type { EvaluatedToolCall } from "./evaluator.ts";
 import {
 	buildApprovalPrompt,
 	buildCustomApprovalPrompt,
 	buildFileApprovalPrompt,
 } from "./prompt.ts";
-import { getCommandArgs, getCommandName, isBareAssignment } from "./resolve.ts";
-import type { Action, CommandRef, ToolCallInput } from "./types.ts";
-import { expandWrapperCommands } from "./wrappers.ts";
+import { getCommandName } from "./resolve.ts";
+import type { Action, ToolCallInput } from "./types.ts";
 
-export async function handleInteractiveApproval(
-	pi: ExtensionAPI,
-	tool: string,
-	input: ToolCallInput,
-	ctx: ExtensionContext,
-	sessionRules: Record<string, Record<string, Action>>,
-): Promise<{ block: true; reason: string } | undefined> {
-	const value = String(
-		input[
-			tool === "bash"
-				? "command"
-				: tool === "read" || tool === "edit" || tool === "write"
-					? "path"
-					: (Object.keys(input)[0] ?? "input")
-		],
-	);
-	return handleToolApproval(
-		pi,
-		tool,
-		"ask",
-		ctx,
-		sessionRules,
-		buildCustomApprovalPrompt(tool, value),
-	);
+type BlockResult = { block: true; reason: string };
+
+function block(reason: string): BlockResult {
+	return { block: true, reason: `[Blocked by pi-guard: ${reason}]` };
 }
 
-export async function handleBashTool(
-	pi: ExtensionAPI,
-	tool: string,
-	rawCmd: string,
-	toolRules: Record<string, Action>,
-	ctx: ExtensionContext,
-	sessionRules: Record<string, Record<string, Action>>,
-): Promise<{ block: true; reason: string } | undefined> {
-	let ast: Script | undefined;
-	try {
-		ast = parseBash(rawCmd);
-	} catch {
-		return handleBashParseFailure(pi, ctx);
-	}
-
-	const { commands: allCommands, expandedWrappers } = expandWrapperCommands(
-		extractAllCommandsFromAST(ast, rawCmd),
-	);
-	if (allCommands.length === 0) return;
-
-	const unauthorizedCommands = findUnauthorizedCommands(allCommands, toolRules);
-	if (unauthorizedCommands.length === 0) return;
-
-	if (!ctx.hasUI)
-		return handleNonInteractiveBash(unauthorizedCommands, toolRules);
-
-	return handleInteractiveBash(
-		pi,
-		tool,
-		allCommands,
-		unauthorizedCommands,
-		expandedWrappers,
-		ctx,
-		sessionRules,
-	);
+function inputValue(tool: string, input: ToolCallInput): string {
+	const key =
+		tool === "bash"
+			? "command"
+			: tool === "read" || tool === "edit" || tool === "write"
+				? "path"
+				: (Object.keys(input)[0] ?? "input");
+	return String(input[key]);
 }
 
 async function handleBashParseFailure(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
-): Promise<{ block: true; reason: string } | undefined> {
-	if (!ctx.hasUI) {
-		return {
-			block: true,
-			reason: `[Blocked by pi-guard: Failed to parse command safely]`,
-		};
-	}
+): Promise<BlockResult | undefined> {
+	if (!ctx.hasUI) return block("Failed to parse command safely");
 
 	pi.events.emit("nudge", { body: "Command needs approval" });
 	const confirmed = await ctx.ui.confirm(
 		"⚠️ Could Not Parse Command Safely",
 		"\nAllow anyway?",
 	);
-
-	if (!confirmed) {
-		return {
-			block: true,
-			reason: `[Blocked by pi-guard: User rejected this invocation]`,
-		};
-	}
+	return confirmed ? undefined : block("User rejected this invocation");
 }
 
-function findUnauthorizedCommands(
-	allCommands: CommandRef[],
-	toolRules: Record<string, Action>,
-): CommandRef[] {
-	const unauthorized: CommandRef[] = [];
-	for (const cmd of allCommands) {
-		if (isBareAssignment(cmd)) continue;
-		const name = getCommandName(cmd);
-		const args = getCommandArgs(cmd);
-		if (resolveBashAction(name, args, toolRules) !== "allow") {
-			unauthorized.push(cmd);
-		}
+function saveBashAllowRules(
+	sessionRules: Record<string, Record<string, Action>>,
+	tool: string,
+	commandNames: string[],
+	configPath?: string,
+): void {
+	sessionRules[tool] = sessionRules[tool] ?? {};
+	for (const name of commandNames) {
+		if (configPath) saveRule(configPath, tool, name, "allow");
+		sessionRules[tool][name] = "allow";
 	}
-	return unauthorized;
-}
-
-function handleNonInteractiveBash(
-	unauthorizedCommands: CommandRef[],
-	toolRules: Record<string, Action>,
-): { block: true; reason: string } | undefined {
-	const firstCmd = unauthorizedCommands[0];
-	if (!firstCmd) return;
-	const name = getCommandName(firstCmd);
-	const args = getCommandArgs(firstCmd);
-	const action = resolveBashAction(name, args, toolRules);
-
-	if (action === "deny") {
-		return { block: true, reason: `[Blocked by pi-guard: Security policy]` };
-	}
-	return {
-		block: true,
-		reason: `[Blocked by pi-guard: No interactive session available]`,
-	};
 }
 
 async function handleInteractiveBash(
 	pi: ExtensionAPI,
-	tool: string,
-	allCommands: CommandRef[],
-	unauthorizedCommands: CommandRef[],
-	expandedWrappers: Set<CommandRef>,
+	evaluated: EvaluatedToolCall,
 	ctx: ExtensionContext,
 	sessionRules: Record<string, Record<string, Action>>,
-): Promise<{ block: true; reason: string } | undefined> {
+): Promise<BlockResult | undefined> {
+	const bash = evaluated.bash;
+	if (!bash) return block("Internal evaluation error");
+	const tool = evaluated.result.tool;
 	const uniqueBaseNames = Array.from(
-		new Set(unauthorizedCommands.map(getCommandName)),
+		new Set(bash.askCommands.map(getCommandName)),
 	);
 	const alwaysLabel = `Always allow ${uniqueBaseNames.join(", ")} (this session)`;
-
 	const projectPath = getProjectSettingsPath(ctx.cwd);
 	const globalWritable = isConfigWritable(GLOBAL_SETTINGS_PATH);
-
 	const choices = [
 		"Allow",
 		alwaysLabel,
-		"Allow for this project  \u2192  .pi/settings.json",
-		...(globalWritable ? ["Allow globally  \u2192  settings.json"] : []),
+		"Allow for this project  →  .pi/settings.json",
+		...(globalWritable ? ["Allow globally  →  settings.json"] : []),
 		"Reject",
 	];
 
 	pi.events.emit("nudge", { body: "Command needs approval" });
 	const choice = await ctx.ui.select(
 		buildApprovalPrompt(
-			allCommands,
-			unauthorizedCommands,
+			bash.allCommands,
+			bash.askCommands,
 			undefined,
-			expandedWrappers,
+			bash.expandedWrappers,
 		),
 		choices,
 	);
 
 	if (choice === alwaysLabel) {
-		sessionRules[tool] = sessionRules[tool] ?? {};
-		for (const name of uniqueBaseNames) {
-			sessionRules[tool][name] = "allow";
-		}
+		saveBashAllowRules(sessionRules, tool, uniqueBaseNames);
 		return;
 	}
-
 	if (choice?.startsWith("Allow for this project")) {
-		sessionRules[tool] = sessionRules[tool] ?? {};
-		for (const name of uniqueBaseNames) {
-			saveRule(projectPath, tool, name, "allow");
-			sessionRules[tool][name] = "allow";
-		}
+		saveBashAllowRules(sessionRules, tool, uniqueBaseNames, projectPath);
 		return;
 	}
-
 	if (globalWritable && choice?.startsWith("Allow globally")) {
-		sessionRules[tool] = sessionRules[tool] ?? {};
-		for (const name of uniqueBaseNames) {
-			saveRule(GLOBAL_SETTINGS_PATH, tool, name, "allow");
-			sessionRules[tool][name] = "allow";
-		}
+		saveBashAllowRules(
+			sessionRules,
+			tool,
+			uniqueBaseNames,
+			GLOBAL_SETTINGS_PATH,
+		);
 		return;
 	}
-
-	if (choice !== "Allow") {
-		return {
-			block: true,
-			reason: `[Blocked by pi-guard: User rejected this invocation]`,
-		};
-	}
+	return choice === "Allow"
+		? undefined
+		: block("User rejected this invocation");
 }
 
-async function handleToolApproval(
+async function handleInteractiveTool(
 	pi: ExtensionAPI,
-	tool: string,
-	action: Action | undefined,
+	evaluated: EvaluatedToolCall,
 	ctx: ExtensionContext,
 	sessionRules: Record<string, Record<string, Action>>,
-	prompt: string,
-): Promise<{ block: true; reason: string } | undefined> {
-	if (action === "allow") return;
-	if (action === "deny") {
-		return { block: true, reason: "[Blocked by pi-guard: Security policy]" };
-	}
-	if (!ctx.hasUI) {
-		return {
-			block: true,
-			reason: "[Blocked by pi-guard: No interactive session available]",
-		};
-	}
+): Promise<BlockResult | undefined> {
+	const { tool, input } = evaluated.result;
+	const value = inputValue(tool, input);
+	const prompt =
+		tool === "read" || tool === "edit" || tool === "write"
+			? buildFileApprovalPrompt(tool, value)
+			: buildCustomApprovalPrompt(tool, value);
 	const alwaysLabel = `Always allow ${tool} (this session)`;
 	pi.events.emit("nudge", { body: `${tool} needs approval` });
 	const choice = await ctx.ui.select(prompt, ["Allow", alwaysLabel, "Reject"]);
@@ -242,46 +135,25 @@ async function handleToolApproval(
 		sessionRules[tool] = { ...sessionRules[tool], "*": "allow" };
 		return;
 	}
-	if (choice !== "Allow") {
-		return {
-			block: true,
-			reason: "[Blocked by pi-guard: User rejected this invocation]",
-		};
+	return choice === "Allow"
+		? undefined
+		: block("User rejected this invocation");
+}
+
+/** Enforce a result produced by the common policy evaluator. */
+export async function enforceToolEvaluation(
+	pi: ExtensionAPI,
+	evaluated: EvaluatedToolCall,
+	ctx: ExtensionContext,
+	sessionRules: Record<string, Record<string, Action>>,
+): Promise<BlockResult | undefined> {
+	const { result } = evaluated;
+	if (result.disposition === "bypass" || result.disposition === "allow") return;
+	if (result.disposition === "deny") return block("Security policy");
+	if (result.parserError) return handleBashParseFailure(pi, ctx);
+	if (!ctx.hasUI) return block("No interactive session available");
+	if (evaluated.bash) {
+		return handleInteractiveBash(pi, evaluated, ctx, sessionRules);
 	}
-}
-
-export async function handleGlobTool(
-	pi: ExtensionAPI,
-	tool: string,
-	path: string,
-	toolRules: Record<string, Action>,
-	ctx: ExtensionContext,
-	sessionRules: Record<string, Record<string, Action>>,
-): Promise<{ block: true; reason: string } | undefined> {
-	return handleToolApproval(
-		pi,
-		tool,
-		resolveGlobAction(path, toolRules),
-		ctx,
-		sessionRules,
-		buildFileApprovalPrompt(tool, path),
-	);
-}
-
-export async function handleExactTool(
-	pi: ExtensionAPI,
-	tool: string,
-	value: string,
-	toolRules: Record<string, Action>,
-	ctx: ExtensionContext,
-	sessionRules: Record<string, Record<string, Action>>,
-): Promise<{ block: true; reason: string } | undefined> {
-	return handleToolApproval(
-		pi,
-		tool,
-		resolveExactAction(value, toolRules),
-		ctx,
-		sessionRules,
-		buildCustomApprovalPrompt(tool, value),
-	);
+	return handleInteractiveTool(pi, evaluated, ctx, sessionRules);
 }

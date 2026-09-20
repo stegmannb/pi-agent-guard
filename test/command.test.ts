@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { buildListOutput, handleGuardCommand } from "../src/commands.ts";
+import { DEFAULT_CONFIG } from "../src/defaults.ts";
 import { parseGuardArgs } from "../src/index.ts";
+import { buildPolicySnapshot } from "../src/policy.ts";
+import type { GuardContext } from "../src/types.ts";
 
 test("parseGuardArgs", async (t) => {
 	await t.test("parses single-token target", () => {
@@ -63,4 +67,27 @@ test("parseGuardArgs", async (t) => {
 			target: "write ~/.ssh/*",
 		});
 	});
+});
+
+test("guard list renders the current runtime policy snapshot", () => {
+	const context: GuardContext = {
+		config: DEFAULT_CONFIG,
+		staticPolicy: {
+			userRules: {},
+			projectRules: {},
+			envRules: undefined,
+			projectConfigPresent: false,
+		},
+		activeProfile: undefined,
+		sessionRules: { bash: { git: "allow" } },
+		exactSessionGrants: [
+			{ tool: "bash", input: { command: "git push" }, cwd: "/repo" },
+		],
+	};
+	const snapshot = buildPolicySnapshot(context);
+	const result = handleGuardCommand("list", undefined, context);
+	assert.equal(result.message, buildListOutput(snapshot));
+	assert.match(result.message, new RegExp(snapshot.policyVersion));
+	assert.match(result.message, /git: allow \[session\]/);
+	assert.match(result.message, /bash @ \/repo: {"command":"git push"}/);
 });

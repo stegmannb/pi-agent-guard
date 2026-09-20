@@ -10,7 +10,8 @@ pi-guard intercepts tool calls and prompts for approval before executing potenti
 - **Path matching** — Glob patterns for file read/write/edit permissions
 - **Extensible** — Add matchers for any tool with `exact`, `glob`, or `bash` matching
 - **Sensible defaults** — Reading is safe, writing is dangerous. Works out of the box
-- **Layered configuration** — Default → user → project → env → profile → session, last match wins
+- **Layered configuration** — Default → user → project → env → profile → session, with provenance for the effective rules
+- **Policy inspection** — The `guard_check` tool explains the active policy or dry-runs a proposed tool call without side effects
 - **Non-interactive support** — Denied commands are silently blocked in CI/CD; use `PI_GUARD` env var for automation
 - **Session rules** — "Always allow for this session" without modifying config files
 
@@ -124,11 +125,38 @@ https://api.github.com/repos/jdiamond/pi-guard/issues
 
 In non-interactive mode (e.g., CI), unauthorized commands are silently blocked without a prompt.
 
+A `deny` result is final for the complete tool call. If any command in a pipeline, subshell, wrapper, or compound expression is denied, pi-guard blocks the tool call before opening an approval prompt.
+
 ## Install
 
 ```bash
 pi install npm:pi-guard
 ```
+
+## Run the current checkout with Nix
+
+The flake provides an isolated pi executable that loads exactly the packaged
+pi-guard source from the current checkout:
+
+```bash
+nix run .
+```
+
+Arguments after `--` are forwarded to pi:
+
+```bash
+nix run . -- --model sonnet:high
+```
+
+The runner uses the configured `PI_CODING_AGENT_DIR` for authentication, models,
+and guard settings. It starts pi with extension discovery disabled and then loads
+only this flake's pi-guard package, so an already installed pi-guard version cannot
+be loaded alongside the checkout. Other extensions are intentionally absent from
+this isolated development run; pass additional explicit `--extension` arguments
+when an integration test requires them.
+
+The runner is available on x86_64 Linux, aarch64 Linux, and Apple Silicon macOS.
+The standalone pi-guard package remains available on Intel macOS.
 
 ## Configuration
 
@@ -253,7 +281,41 @@ Each permission rule resolves to one of:
 |--------|----------|
 | `allow` | Run without approval |
 | `ask` | Prompt for approval (block in non-interactive mode) |
-| `deny` | Block the action |
+| `deny` | Block the complete tool call before approval UI opens |
+
+## Inspecting the active policy
+
+pi-guard registers a read-only `guard_check` tool for agents. It uses the same policy snapshot and evaluator as real tool execution.
+
+Use `mode: "check"` to evaluate a proposed tool call:
+
+```json
+{
+  "mode": "check",
+  "tool": "bash",
+  "input": { "command": "git status" }
+}
+```
+
+The result includes the extracted input, whether the guard is enabled, the effective action, the enforcement disposition, review eligibility, the winning rule and its source layer, a policy version, and per-command results for Bash. Parser and input errors are returned explicitly. A disposition of `bypass` means the guard is disabled; it is distinct from an `allow` policy decision.
+
+Use `mode: "rules"` to inspect the merged policy:
+
+```json
+{
+  "mode": "rules",
+  "tool": "bash",
+  "commandPrefix": "git"
+}
+```
+
+The optional filters reduce the displayed rules only; they do not change the policy version or recompute decisions. The response contains every policy layer, rule origin, overridden rules, effective rules, matcher semantics, and the active profile. `/guard list` presents the same runtime snapshot in a human-readable form.
+
+`guard_check` never executes a command, opens approval UI, or modifies session or persistent rules. Its result covers pi-guard only; another sandbox or extension can still reject an allowed call.
+
+User, project, and `PI_GUARD` sources are captured when the extension starts. Profile selection, session rules, and the session-only enabled override are applied dynamically and produce a new policy version.
+
+When an exact session grant is present, the snapshot keeps its tool, complete input, and working directory unchanged. It can allow only an otherwise `ask` result with the same input and directory; a `deny` remains authoritative. Exact grants are included in `guard_check`, `/guard list`, and the policy version.
 
 ## Rule precedence
 

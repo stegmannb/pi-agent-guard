@@ -64,9 +64,7 @@ export function saveRule(
 		const guard = (settings.guard ?? {}) as Record<string, unknown>;
 		const rules = (guard.rules ?? {}) as Record<string, unknown>;
 		const toolRules = (
-			typeof rules[tool] === "object" && rules[tool] !== null
-				? rules[tool]
-				: {}
+			typeof rules[tool] === "object" && rules[tool] !== null ? rules[tool] : {}
 		) as Record<string, Action>;
 
 		toolRules[commandName] = action;
@@ -76,7 +74,7 @@ export function saveRule(
 
 		fs.writeFileSync(
 			configPath,
-			JSON.stringify(settings, null, 2) + "\n",
+			`${JSON.stringify(settings, null, 2)}\n`,
 			"utf-8",
 		);
 	} catch (e) {

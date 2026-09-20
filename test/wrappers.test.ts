@@ -36,6 +36,47 @@ test("expandWrapperCommands", async (t) => {
 		]);
 	});
 
+	await t.test("xargs — preserves literal quote arguments", () => {
+		const raw = `xargs echo "'"`;
+		const ast = parseBash(raw);
+		const commands = extractAllCommandsFromAST(ast, raw);
+		const result = expandWrapperCommands(commands);
+		assert.deepEqual(result.parserErrors, []);
+		assert.deepEqual(
+			result.commands.map((cmd) => ({
+				name: getCommandName(cmd),
+				args: getCommandArgs(cmd),
+			})),
+			[
+				{ name: "xargs", args: ["echo", "'"] },
+				{ name: "echo", args: ["'"] },
+			],
+		);
+	});
+
+	for (const executable of ["foo=bar", "if"]) {
+		await t.test(
+			`xargs — preserves ${executable} as an executable name`,
+			() => {
+				const raw = `xargs ${executable}`;
+				const ast = parseBash(raw);
+				const commands = extractAllCommandsFromAST(ast, raw);
+				const result = expandWrapperCommands(commands);
+				assert.deepEqual(result.parserErrors, []);
+				assert.deepEqual(
+					result.commands.map((cmd) => ({
+						name: getCommandName(cmd),
+						args: getCommandArgs(cmd),
+					})),
+					[
+						{ name: "xargs", args: [executable] },
+						{ name: executable, args: [] },
+					],
+				);
+			},
+		);
+	}
+
 	await t.test("xargs — with flags before sub-command", () => {
 		const result = expand("find . -name '*.ts' | xargs -0 rm -rf");
 		assert.deepEqual(result, [
@@ -482,7 +523,10 @@ test("formatWrapperDisplay", async (t) => {
 	await t.test("nix run ... -- cmd — extracts sub-command after --", () => {
 		const result = expand("nix run nixpkgs#nodejs -- node -e hi");
 		assert.deepEqual(result, [
-			{ name: "nix", args: ["run", "nixpkgs#nodejs", "--", "node", "-e", "hi"] },
+			{
+				name: "nix",
+				args: ["run", "nixpkgs#nodejs", "--", "node", "-e", "hi"],
+			},
 			{ name: "node", args: ["-e", "hi"] },
 		]);
 	});
@@ -490,7 +534,10 @@ test("formatWrapperDisplay", async (t) => {
 	await t.test("nix shell ... -- cmd — extracts sub-command after --", () => {
 		const result = expand("nix shell nixpkgs#cowsay -- cowsay hello");
 		assert.deepEqual(result, [
-			{ name: "nix", args: ["shell", "nixpkgs#cowsay", "--", "cowsay", "hello"] },
+			{
+				name: "nix",
+				args: ["shell", "nixpkgs#cowsay", "--", "cowsay", "hello"],
+			},
 			{ name: "cowsay", args: ["hello"] },
 		]);
 	});
@@ -498,7 +545,10 @@ test("formatWrapperDisplay", async (t) => {
 	await t.test("nix without -- — no sub-command extracted", () => {
 		const result = expand("nix run nixpkgs#hello");
 		assert.equal(result.length, 1);
-		assert.deepEqual(result[0], { name: "nix", args: ["run", "nixpkgs#hello"] });
+		assert.deepEqual(result[0], {
+			name: "nix",
+			args: ["run", "nixpkgs#hello"],
+		});
 	});
 
 	await t.test("nix run ... -- cmd — formatWrapperDisplay", () => {
@@ -536,20 +586,21 @@ test("formatWrapperDisplay", async (t) => {
 		]);
 	});
 
-	await t.test("direnv exec . -- cmd — formatWrapperDisplay includes separator", () => {
-		assert.equal(
-			formatWrapperDisplay(
-				findCmd("direnv exec . -- kustomize version", "direnv"),
-			),
-			"direnv exec . -- ...",
-		);
-	});
+	await t.test(
+		"direnv exec . -- cmd — formatWrapperDisplay includes separator",
+		() => {
+			assert.equal(
+				formatWrapperDisplay(
+					findCmd("direnv exec . -- kustomize version", "direnv"),
+				),
+				"direnv exec . -- ...",
+			);
+		},
+	);
 
 	await t.test("direnv exec . cmd — formatWrapperDisplay", () => {
 		assert.equal(
-			formatWrapperDisplay(
-				findCmd("direnv exec . npx tsc --noEmit", "direnv"),
-			),
+			formatWrapperDisplay(findCmd("direnv exec . npx tsc --noEmit", "direnv")),
 			"direnv exec . ...",
 		);
 	});
@@ -690,14 +741,21 @@ test("wrapper expansion + rule resolution", async (t) => {
 		assert.deepEqual(unauthorized, []);
 	});
 
-	await t.test("direnv exec . -- kustomize — with double-dash, both allowed", () => {
-		const rules = { "*": "ask", direnv: "allow", kustomize: "allow" } as const;
-		const unauthorized = resolveUnauthorized(
-			"direnv exec . -- kustomize version",
-			rules,
-		);
-		assert.deepEqual(unauthorized, []);
-	});
+	await t.test(
+		"direnv exec . -- kustomize — with double-dash, both allowed",
+		() => {
+			const rules = {
+				"*": "ask",
+				direnv: "allow",
+				kustomize: "allow",
+			} as const;
+			const unauthorized = resolveUnauthorized(
+				"direnv exec . -- kustomize version",
+				rules,
+			);
+			assert.deepEqual(unauthorized, []);
+		},
+	);
 
 	await t.test("direnv exec . -- kustomize — kustomize unapproved", () => {
 		const rules = { "*": "ask", direnv: "allow" } as const;

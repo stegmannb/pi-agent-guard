@@ -1,9 +1,18 @@
 import { parse as parseBash } from "unbash";
 import type { ExtractCtx } from "./extract.ts";
-import { createExtractCtx, extractAllCommandsFromAST } from "./extract.ts";
+import { extractAllCommandsFromAST } from "./extract.ts";
 import { formatCommand } from "./format.ts";
 import { getCommandArgs, getCommandName } from "./resolve.ts";
 import type { CommandRef } from "./types.ts";
+
+interface ParserDiagnostic {
+	message: string;
+	pos: number;
+}
+
+interface ExpansionContext extends ExtractCtx {
+	parserErrors: string[];
+}
 
 /**
  * Describes how a wrapper command embeds a sub-command.
@@ -23,7 +32,13 @@ import type { CommandRef } from "./types.ts";
  *   Example: fd . -e ts -x rm {}    (keywords: ["-x", "--exec", "-X", "--exec-batch"], terminators: null)
  */
 export type WrapperSpec =
-	| { type: "passthrough"; flagArgs?: string[]; skipVarAssignments?: boolean; separator?: string; skipArgs?: number }
+	| {
+			type: "passthrough";
+			flagArgs?: string[];
+			skipVarAssignments?: boolean;
+			separator?: string;
+			skipArgs?: number;
+	  }
 	| { type: "flag"; flag: string; flagArgs?: string[] }
 	| { type: "exec"; keywords: string[]; terminators: string[] | null };
 
@@ -100,6 +115,7 @@ export const WRAPPER_COMMANDS: Record<string, WrapperSpec> = {
 export type ExpansionResult = {
 	commands: CommandRef[];
 	expandedWrappers: Set<CommandRef>;
+	parserErrors: string[];
 };
 
 /**
@@ -118,15 +134,18 @@ export function expandWrapperCommands(commands: CommandRef[]): ExpansionResult {
 		(max, cmd) => Math.max(max, cmd.group ?? 0),
 		-1,
 	);
-	const ctx: ExtractCtx = { nextGroupId: maxGroupId + 1 };
+	const ctx: ExpansionContext = {
+		nextGroupId: maxGroupId + 1,
+		parserErrors: [],
+	};
 	const result = doExpand(commands, expandedWrappers, ctx);
-	return { commands: result, expandedWrappers };
+	return { commands: result, expandedWrappers, parserErrors: ctx.parserErrors };
 }
 
 function doExpand(
 	commands: CommandRef[],
 	expandedWrappers: Set<CommandRef>,
-	ctx: ExtractCtx,
+	ctx: ExpansionContext,
 ): CommandRef[] {
 	const result: CommandRef[] = [...commands];
 
@@ -151,22 +170,22 @@ function doExpand(
 function extractSubCommands(
 	cmd: CommandRef,
 	spec: WrapperSpec,
-	ctx: ExtractCtx,
+	ctx: ExpansionContext,
 ): CommandRef[] {
 	switch (spec.type) {
 		case "passthrough":
 			return extractPassthrough(
 				cmd,
+				ctx,
 				spec.flagArgs,
 				spec.skipVarAssignments ?? false,
 				spec.separator,
 				spec.skipArgs,
-				ctx,
 			);
 		case "flag":
-			return extractFlag(cmd, spec.flag, spec.flagArgs, ctx);
+			return extractFlag(cmd, ctx, spec.flag, spec.flagArgs);
 		case "exec":
-			return extractExec(cmd, spec.keywords, spec.terminators, ctx);
+			return extractExec(cmd, ctx, spec.keywords, spec.terminators);
 	}
 }
 
@@ -182,6 +201,31 @@ function extractSubCommands(
  * 5. Separator token: everything after `--` is the sub-command
  * 6. skipArgs: skip a fixed number of positional args after flags
  */
+function separatorBoundary(
+	args: string[],
+	separator: string | undefined,
+): number | undefined {
+	if (!separator) return undefined;
+	const separatorIndex = args.indexOf(separator);
+	return separatorIndex >= 0 ? separatorIndex + 1 : args.length;
+}
+
+function nextPassthroughIndex(
+	arg: string,
+	index: number,
+	args: string[],
+	flagArgs: string[] | undefined,
+	skipVarAssignments: boolean,
+): number | undefined {
+	if (skipVarAssignments && isVarAssignment(arg)) return index + 1;
+	if (!arg.startsWith("-")) return undefined;
+
+	const span = flagSpan(arg, index, args, flagArgs);
+	const valueIsAssignment =
+		span === 2 && skipVarAssignments && isVarAssignment(args[index + 1] ?? "");
+	return index + (valueIsAssignment ? 1 : span);
+}
+
 function scanPassthroughBoundary(
 	args: string[],
 	flagArgs?: string[],
@@ -192,34 +236,22 @@ function scanPassthroughBoundary(
 	// If a separator is configured, scan for it first. Everything after
 	// the separator is the sub-command (even if it looks like flags).
 	// If the separator is not found, there is no sub-command to extract.
-	if (separator) {
-		const sepIdx = args.indexOf(separator);
-		if (sepIdx >= 0) return sepIdx + 1;
-		return args.length;
-	}
+	const separated = separatorBoundary(args, separator);
+	if (separated !== undefined) return separated;
 
 	let i = 0;
 	while (i < args.length) {
 		const arg = args[i];
 		if (arg === undefined) break;
-
-		if (skipVarAssignments && isVarAssignment(arg)) {
-			i++;
-			continue;
-		}
-
-		if (!arg.startsWith("-")) break;
-
-		const span = flagSpan(arg, i, args, flagArgs);
-		if (
-			span === 2 &&
-			skipVarAssignments &&
-			isVarAssignment(args[i + 1] ?? "")
-		) {
-			i++;
-		} else {
-			i += span;
-		}
+		const next = nextPassthroughIndex(
+			arg,
+			i,
+			args,
+			flagArgs,
+			skipVarAssignments,
+		);
+		if (next === undefined) break;
+		i = next;
 	}
 
 	// After skipping flags, also skip a fixed number of positional args.
@@ -239,6 +271,10 @@ function scanPassthroughBoundary(
 	return i;
 }
 
+function shellQuoteToken(token: string): string {
+	return `'${token.replaceAll("'", `'"'"'`)}'`;
+}
+
 /**
  * For passthrough wrappers: skip the wrapper's own flags (and optionally
  * NAME=VALUE var assignments), then parse the remaining arguments as a
@@ -248,16 +284,22 @@ function scanPassthroughBoundary(
  */
 function extractPassthrough(
 	cmd: CommandRef,
+	ctx: ExpansionContext,
 	flagArgs?: string[],
 	skipVarAssignments = false,
 	separator?: string,
 	skipArgs?: number,
-	ctx?: ExtractCtx,
 ): CommandRef[] {
 	const args = getCommandArgs(cmd);
-	const i = scanPassthroughBoundary(args, flagArgs, skipVarAssignments, separator, skipArgs);
+	const i = scanPassthroughBoundary(
+		args,
+		flagArgs,
+		skipVarAssignments,
+		separator,
+		skipArgs,
+	);
 	if (i >= args.length) return [];
-	return parseSubCommandString(args.slice(i).join(" "), ctx);
+	return parseCommandTokens(args.slice(i), ctx);
 }
 
 /**
@@ -268,9 +310,9 @@ function extractPassthrough(
  */
 function extractFlag(
 	cmd: CommandRef,
+	ctx: ExpansionContext,
 	targetFlag: string,
 	flagArgs?: string[],
-	ctx?: ExtractCtx,
 ): CommandRef[] {
 	const args = getCommandArgs(cmd);
 
@@ -322,9 +364,9 @@ function collectExecCommand(
 
 function extractExec(
 	cmd: CommandRef,
+	ctx: ExpansionContext,
 	keywords: string[],
 	terminators: string[] | null,
-	ctx?: ExtractCtx,
 ): CommandRef[] {
 	const args = getCommandArgs(cmd);
 	const results: CommandRef[] = [];
@@ -337,7 +379,7 @@ function extractExec(
 			const { parts, nextIdx } = collectExecCommand(args, i + 1, terminators);
 			i = nextIdx;
 			if (parts.length > 0) {
-				results.push(...parseSubCommandString(parts.join(" "), ctx));
+				results.push(...parseCommandTokens(parts, ctx));
 			}
 			continue;
 		}
@@ -348,17 +390,59 @@ function extractExec(
 }
 
 /**
+ * Rebuild an argv-style embedded command without letting the shell parser
+ * reinterpret its executable name as syntax or an assignment.
+ */
+function parseCommandTokens(
+	tokens: string[],
+	ctx: ExpansionContext,
+): CommandRef[] {
+	const [executable, ...args] = tokens;
+	if (executable === undefined) return [];
+	const placeholder = "__pi_guard_embedded_executable__";
+	const serialized = [placeholder, ...args].map(shellQuoteToken).join(" ");
+	const commands = parseSubCommandString(serialized, ctx);
+	const command = commands[0];
+	if (!command?.node.name) return commands;
+	command.node.name = {
+		pos: 0,
+		end: 0,
+		text: executable,
+		value: executable,
+		parts: [{ type: "Literal", text: executable, value: executable }],
+	};
+	return commands;
+}
+
+/**
  * Parse a command string and extract all top-level commands from it.
  * Uses the provided context for group ID allocation, or creates a fresh one.
  */
-function parseSubCommandString(str: string, ctx?: ExtractCtx): CommandRef[] {
+function parseSubCommandString(
+	str: string,
+	ctx: ExpansionContext,
+): CommandRef[] {
 	try {
-		const ast = parseBash(str);
-		return extractAllCommandsFromAST(ast, str, ctx ?? createExtractCtx());
-	} catch {
-		// If we can't parse the sub-command string, we can't check it.
-		// Return empty — the caller will still check the wrapper command
-		// itself against rules.
+		const ast = parseBash(str) as ReturnType<typeof parseBash> & {
+			errors?: ParserDiagnostic[];
+		};
+		const diagnostics = ast.errors ?? [];
+		if (diagnostics.length > 0) {
+			ctx.parserErrors.push(
+				...diagnostics.map(
+					(diagnostic) =>
+						`${diagnostic.message} at ${diagnostic.pos} in embedded command`,
+				),
+			);
+			return [];
+		}
+		return extractAllCommandsFromAST(ast, str, ctx);
+	} catch (error) {
+		ctx.parserErrors.push(
+			error instanceof Error
+				? `${error.message} in embedded command`
+				: "Unknown parser error in embedded command",
+		);
 		return [];
 	}
 }
@@ -435,7 +519,12 @@ export function formatWrapperDisplay(cmd: CommandRef): string {
 function formatPassthroughDisplay(
 	name: string,
 	args: string[],
-	spec: { flagArgs?: string[]; skipVarAssignments?: boolean; separator?: string; skipArgs?: number },
+	spec: {
+		flagArgs?: string[];
+		skipVarAssignments?: boolean;
+		separator?: string;
+		skipArgs?: number;
+	},
 ): string {
 	const i = scanPassthroughBoundary(
 		args,

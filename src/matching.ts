@@ -1,6 +1,11 @@
 import { minimatch } from "minimatch";
 import type { Action } from "./types.ts";
 
+export interface RuleResolution {
+	action: Action;
+	pattern: string;
+}
+
 /**
  * Check if a single needle token matches a haystack token.
  * Tokens containing `*` or `?` are matched as globs; otherwise exact match.
@@ -68,20 +73,29 @@ export function resolveBashAction(
 	commandArgs: string[],
 	rules: Record<string, Action>,
 ): Action | undefined {
-	let result: Action | undefined;
+	return resolveBashRule(commandName, commandArgs, rules)?.action;
+}
+
+export function resolveBashRule(
+	commandName: string,
+	commandArgs: string[],
+	rules: Record<string, Action>,
+): RuleResolution | undefined {
+	let result: RuleResolution | undefined;
 
 	for (const [pattern, action] of Object.entries(rules)) {
 		if (pattern === "*") {
-			result = action;
+			result = { action, pattern };
 			continue;
 		}
 
 		const [patternName, ...patternArgs] = pattern.split(" ");
+		if (patternName === undefined) continue;
 
 		if (!tokenMatches(patternName, commandName)) continue;
 
 		if (patternArgs.length === 0 || isSubsequence(patternArgs, commandArgs)) {
-			result = action;
+			result = { action, pattern };
 		}
 	}
 
@@ -100,16 +114,23 @@ export function resolveGlobAction(
 	input: string,
 	rules: Record<string, Action>,
 ): Action | undefined {
-	let result: Action | undefined;
+	return resolveGlobRule(input, rules)?.action;
+}
+
+export function resolveGlobRule(
+	input: string,
+	rules: Record<string, Action>,
+): RuleResolution | undefined {
+	let result: RuleResolution | undefined;
 
 	for (const [pattern, action] of Object.entries(rules)) {
 		if (pattern === "*") {
-			result = action;
+			result = { action, pattern };
 			continue;
 		}
 
 		if (globMatch(pattern, input)) {
-			result = action;
+			result = { action, pattern };
 		}
 	}
 
@@ -128,16 +149,23 @@ export function resolveExactAction(
 	input: string,
 	rules: Record<string, Action>,
 ): Action | undefined {
-	let result: Action | undefined;
+	return resolveExactRule(input, rules)?.action;
+}
+
+export function resolveExactRule(
+	input: string,
+	rules: Record<string, Action>,
+): RuleResolution | undefined {
+	let result: RuleResolution | undefined;
 
 	for (const [pattern, action] of Object.entries(rules)) {
 		if (pattern === "*") {
-			result = action;
+			result = { action, pattern };
 			continue;
 		}
 
 		if (pattern === input) {
-			result = action;
+			result = { action, pattern };
 		}
 	}
 
