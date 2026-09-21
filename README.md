@@ -234,6 +234,26 @@ replacing existing pattern rules.
 The adapter accepts a per-call model override for the later session picker;
 it snapshots that choice and the global settings before resolving credentials.
 
+Use `/guard model` in the terminal to search Pi's available models with the
+same model selector and keyboard navigation as the main picker. The picker
+shows the current reviewer source and model. Press **Alt+M** to follow the
+current main model again, or use `/guard model main`. To select directly, use
+`/guard model <provider>/<model-id>`; the model ID may itself contain `/`.
+`/guard model status` reports the source and resolved model. The Guard status
+line and `/guard list` show the same information.
+
+A session choice takes precedence over the global `guard.reviewer.model`,
+which defaults to `main`; `main` follows subsequent changes of the working
+model. The choice is stored on the current Pi session branch, survives resume,
+and is inherited only by forks from that branch. A new independent session
+starts with the global setting. Selecting a model never writes Pi's main-model
+defaults or changes its active model. RPC uses a standard selection dialog;
+print/JSON modes require a direct `/guard model` argument and do not open a
+picker. The reviewer adapter can capture a selected model per call, so a call
+already in flight keeps its model when the session choice changes. Connecting
+the adapter to live tool enforcement is a separate follow-up (HL-0374); until
+then, session selections are stored and displayed but do not authorize tools.
+
 For example, `guard-reviewer-policy.txt` could contain:
 
 ```text
