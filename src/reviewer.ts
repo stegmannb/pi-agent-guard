@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { completeSimple } from "@mariozechner/pi-ai";
+import { completeSimple, type Usage } from "@mariozechner/pi-ai";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { ReviewerConfig, ReviewerMode } from "./reviewer-config.ts";
 import type { GuardEvaluation, PolicySnapshot } from "./types.ts";
@@ -42,7 +42,13 @@ export interface ReviewerJudgment {
 }
 
 export type ReviewerResult =
-	| { ok: true; mode: ReviewerMode; model: string; judgment: ReviewerJudgment }
+	| {
+			ok: true;
+			mode: ReviewerMode;
+			model: string;
+			judgment: ReviewerJudgment;
+			usage?: Usage;
+	  }
 	| {
 			ok: false;
 			error:
@@ -527,6 +533,7 @@ export async function reviewGuardRequest(
 			mode: settings.mode,
 			model: `${model.provider}/${model.id}`,
 			judgment,
+			usage: response.usage,
 		};
 	} catch (error) {
 		if (timedOut)

@@ -4,6 +4,10 @@ import type {
 	ExtensionCommandContext,
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
+import {
+	AutoReviewController,
+	type AutoReviewDependencies,
+} from "./auto-review.ts";
 import { handleGuardCommand, parseGuardArgs } from "./commands.ts";
 import {
 	type LoadedConfigResult,
@@ -11,7 +15,6 @@ import {
 	loadProjectConfig,
 } from "./config.ts";
 import { evaluateToolCall } from "./evaluator.ts";
-import { enforceToolEvaluation } from "./handlers.ts";
 import { buildPolicySnapshot, filterPolicySnapshot } from "./policy.ts";
 import {
 	DEFAULT_REVIEWER_CONFIG,
@@ -49,6 +52,7 @@ export interface GuardBootstrap {
 	loaded?: LoadedStartupConfig;
 	projectResult?: LoadedConfigResult | null;
 	startupCwd?: string;
+	autoReview?: AutoReviewDependencies;
 }
 
 function jsonToolResult(value: unknown) {
@@ -132,10 +136,17 @@ export function registerGuard(
 		sessionRules: {},
 		exactSessionGrants: [],
 	};
+	const autoReview = new AutoReviewController(
+		pi,
+		context,
+		reviewerConfig,
+		bootstrap.autoReview,
+	);
 	let sessionGeneration = 0;
 	let sessionActive = true;
 
 	function resetSessionState(): void {
+		autoReview.sessionChanged();
 		sessionGeneration++;
 		sessionActive = true;
 		context.activeProfile = undefined;
@@ -220,6 +231,11 @@ export function registerGuard(
 	): Promise<void> {
 		const { action, target } = parseGuardArgs(args);
 		if (action === "model") return runReviewerModelCommand(target, ctx);
+		if (action === "approve") {
+			const result = autoReview.approve(target, ctx);
+			ctx.ui.notify(result.message, result.ok ? "info" : "warning");
+			return;
+		}
 		const result = handleGuardCommand(action, target, context);
 		const modelStatus = reviewerStatus(ctx);
 		ctx.ui.notify(
@@ -259,6 +275,12 @@ export function registerGuard(
 		resetSessionState();
 		updateGuardStatus(ctx);
 	});
+	pi.on("session_before_switch", async () => autoReview.abortPending());
+	pi.on("session_before_fork", async () => autoReview.abortPending());
+	pi.on("session_before_tree", async () => {
+		autoReview.abortPending();
+		sessionGeneration++;
+	});
 	pi.on("session_switch", async (_event, ctx) => {
 		resetSessionState();
 		updateGuardStatus(ctx);
@@ -271,8 +293,21 @@ export function registerGuard(
 		resetSessionState();
 		sessionActive = false;
 	});
-	pi.on("session_tree", async (_event, ctx) => updateGuardStatus(ctx));
+	pi.on("session_tree", async (_event, ctx) => {
+		autoReview.branchChanged();
+		sessionGeneration++;
+		updateGuardStatus(ctx);
+	});
 	pi.on("model_select", async (_event, ctx) => updateGuardStatus(ctx));
+	pi.on("input", async () => autoReview.newUserInput());
+	pi.on("tool_result", async (event) => {
+		const result = autoReview.toolResult(event);
+		autoReview.newUserInput();
+		return result;
+	});
+	pi.on("tool_execution_end", async (event) =>
+		autoReview.toolExecutionEnd(event),
+	);
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "guard_check") return;
 		if (!sessionActive)
@@ -293,11 +328,11 @@ export function registerGuard(
 			event.input as ToolCallInput,
 			ctx.cwd,
 		);
-		const result = await enforceToolEvaluation(
-			pi,
-			evaluated,
+		const result = await autoReview.handle(
+			event,
 			ctx,
-			context.sessionRules,
+			snapshot,
+			evaluated,
 			isCurrentSession,
 		);
 		return isCurrentSession()

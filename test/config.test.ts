@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
 	buildEffectiveRules,
 	getGuardConfigFromSettings,
+	saveRules,
 	validateLoadedGuardConfig,
 	validateToolRules,
 } from "../src/config.ts";
@@ -28,6 +29,30 @@ test("GLOBAL_SETTINGS_PATH respects PI_CODING_AGENT_DIR", async () => {
 		} else {
 			process.env.PI_CODING_AGENT_DIR = previous;
 		}
+	}
+});
+
+test("batch rule save updates all names together and preserves existing settings", () => {
+	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pi-guard-batch-"));
+	const settingsPath = path.join(directory, "settings.json");
+	try {
+		fs.writeFileSync(
+			settingsPath,
+			JSON.stringify({ guard: { reviewer: { mode: "off" } } }),
+		);
+		assert.equal(
+			saveRules(settingsPath, "bash", ["git", "curl"], "allow"),
+			true,
+		);
+		const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+		assert.deepEqual(settings.guard.rules.bash, {
+			git: "allow",
+			curl: "allow",
+		});
+		assert.deepEqual(settings.guard.reviewer, { mode: "off" });
+		assert.deepEqual(fs.readdirSync(directory), ["settings.json"]);
+	} finally {
+		fs.rmSync(directory, { recursive: true, force: true });
 	}
 });
 

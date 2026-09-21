@@ -199,14 +199,15 @@ Configure in `$PI_CODING_AGENT_DIR/settings.json` (defaults to `~/.pi/agent/sett
 }
 ```
 
-### Reviewer adapter (not yet connected to tool enforcement)
+### Optional command reviewer
 
 The optional reviewer is configured **only** in the global
 `$PI_CODING_AGENT_DIR/settings.json`. Project settings and `PI_GUARD` may add
-pattern rules, but cannot configure the reviewer. The adapter is available to
-extensions through `createReviewerRequest()` and `reviewGuardRequest()`; a later
-integration will connect it to the approval dialog. Setting `mode` to `auto`
-today does not approve tool calls.
+pattern rules, but cannot configure the reviewer. The Guard calls the reviewer
+only for the built-in `bash` tool when a command reaches the catch-all `*` ask
+rule. An effective deny, a specific ask, a parser error, or a non-Bash tool
+never reaches the reviewer. The full original Bash input goes to one tool-free
+model call.
 
 ```json
 {
@@ -228,11 +229,15 @@ or a Pi model registry `provider/id`. Use either inline `policy` or
 read when the extension starts or reloads. A nonempty plaintext policy is
 required for `observe` and `auto`. `reviewTimeoutMs` is a positive, finite
 deadline (default 60 seconds). `approvalTimeoutMs` is a positive, finite
-deadline (default 120 seconds); `null` disables the future approval-dialog
+deadline (default 120 seconds); `null` disables the approval-dialog
 timeout. Invalid reviewer settings disable review and report a warning without
-replacing existing pattern rules.
-The adapter accepts a per-call model override for the later session picker;
-it snapshots that choice and the global settings before resolving credentials.
+replacing existing pattern rules. With `off`, Guard keeps its existing approval
+behavior and makes no reviewer call. `observe` shows the reviewer's judgment
+but still requires a human choice. In `auto`, reviewer `allow` permits that
+one call and `deny` blocks it. A suggested allow or deny opens the approval
+dialog with only `Allow once` or `Deny` selected. Uncertain judgments, timeouts,
+and technical errors also ask the user. Without a UI, those pending questions
+block immediately; a valid reviewer allow may proceed.
 
 Use `/guard model` in the terminal to search Pi's available models with the
 same model selector and keyboard navigation as the main picker. The picker
@@ -249,10 +254,35 @@ and is inherited only by forks from that branch. A new independent session
 starts with the global setting. Selecting a model never writes Pi's main-model
 defaults or changes its active model. RPC uses a standard selection dialog;
 print/JSON modes require a direct `/guard model` argument and do not open a
-picker. The reviewer adapter can capture a selected model per call, so a call
-already in flight keeps its model when the session choice changes. Connecting
-the adapter to live tool enforcement is a separate follow-up (HL-0374); until
-then, session selections are stored and displayed but do not authorize tools.
+picker. Each review captures the model at its start. A later selection affects
+only later calls.
+
+The approval dialog shows the full command, working directory, recommendation,
+and reason. Its options are flat: `Allow once`, `Allow for this session`,
+available project and global rule saves, `Deny`, `Give feedback`, and any
+reviewer alternatives. `Allow for this session` covers only the exact full
+input in the current directory for this Pi session. Project and global saves
+retain their wider command-name rule scope, which the dialog labels. Feedback
+and alternatives go back to the agent; Guard never runs a suggested command
+in place of the original. A reviewer deny includes a request ID. A human can
+use `/guard approve <request-id>` to authorize the next exact matching call
+once, provided the policy has not changed. It cannot override a pattern deny.
+
+The terminal approval countdown shows remaining seconds and a bar that shrinks
+from the right. Any key input, paste, or command scrolling pauses it until the
+user selects `Resume timeout`; silence after a pause does not restart it.
+Timeout denies the current call and never selects a highlighted allow option.
+RPC uses a standard flat selector. Because the standard RPC protocol reports
+only the final choice, the RPC dialog shows `Timeout paused: input activity
+unavailable` and waits for a response or cancellation. Print and JSON modes
+block calls that still need a human choice. Reviewer timeout remains active in
+all modes.
+
+Guard includes the reason and checked alternatives in blocked tool errors and
+adds the reason to permitted tool results without replacing their output.
+Repeated identical denials in one user turn are not reviewed again. New user
+input, other tool results, a changed command, or a policy change permits a new
+evaluation. Reviewer decisions and `Allow once` do not create permanent rules.
 
 For example, `guard-reviewer-policy.txt` could contain:
 
@@ -285,6 +315,10 @@ alternatives with a complete input, reason, and changed-effect description.
 Any alternative still needs a fresh deterministic Guard evaluation. Timeout,
 abort, missing model or credentials, context overflow, provider error, or
 invalid output never produces an approval.
+
+Guard runs inside the Pi process. Protecting the global reviewer policy file
+from the working agent's file writes requires the host sandbox or deployment
+configuration; Guard does not provide separate OS isolation.
 
 ### Shorthand
 

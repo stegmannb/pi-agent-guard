@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -53,14 +54,31 @@ export function saveRule(
 	tool: string,
 	commandName: string,
 	action: Action,
-): void {
+): boolean {
+	return saveRules(configPath, tool, [commandName], action);
+}
+
+/** Persist a set of rule names together so a failed save never grants only some of them. */
+export function saveRules(
+	configPath: string,
+	tool: string,
+	commandNames: string[],
+	action: Action,
+): boolean {
+	if (commandNames.length === 0) return true;
+	let temporaryPath: string | undefined;
 	try {
-		fs.mkdirSync(path.dirname(configPath), { recursive: true });
+		const targetPath = fs.existsSync(configPath)
+			? fs.realpathSync(configPath)
+			: configPath;
+		fs.mkdirSync(path.dirname(targetPath), { recursive: true });
 
 		let settings: Record<string, unknown> = {};
-		if (fs.existsSync(configPath)) {
-			settings = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+		if (fs.existsSync(targetPath)) {
+			settings = JSON.parse(fs.readFileSync(targetPath, "utf-8"));
 		}
+		if (!settings || typeof settings !== "object" || Array.isArray(settings))
+			throw new Error("Settings must be a JSON object.");
 
 		const guard = (settings.guard ?? {}) as Record<string, unknown>;
 		const rules = (guard.rules ?? {}) as Record<string, unknown>;
@@ -68,18 +86,30 @@ export function saveRule(
 			typeof rules[tool] === "object" && rules[tool] !== null ? rules[tool] : {}
 		) as Record<string, Action>;
 
-		toolRules[commandName] = action;
+		for (const commandName of commandNames) toolRules[commandName] = action;
 		rules[tool] = toolRules;
 		guard.rules = rules;
 		settings.guard = guard;
 
-		fs.writeFileSync(
-			configPath,
-			`${JSON.stringify(settings, null, 2)}\n`,
-			"utf-8",
+		temporaryPath = path.join(
+			path.dirname(targetPath),
+			`.${path.basename(targetPath)}.${randomUUID()}.tmp`,
 		);
+		fs.writeFileSync(temporaryPath, `${JSON.stringify(settings, null, 2)}\n`, {
+			encoding: "utf-8",
+			flag: "wx",
+			...(fs.existsSync(targetPath)
+				? { mode: fs.statSync(targetPath).mode & 0o777 }
+				: {}),
+		});
+		fs.renameSync(temporaryPath, targetPath);
+		return true;
 	} catch (e) {
 		console.error(`[pi-guard] Failed to save rule to ${configPath}`, e);
+		return false;
+	} finally {
+		if (temporaryPath && fs.existsSync(temporaryPath))
+			fs.unlinkSync(temporaryPath);
 	}
 }
 
