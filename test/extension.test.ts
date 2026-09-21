@@ -32,6 +32,7 @@ function harness(hasUI = true) {
 	const ctx = {
 		hasUI,
 		cwd: "/workspace",
+		sessionManager: { getSessionId: () => "session-test" },
 		ui: {
 			select: async () => {
 				selectCalls++;

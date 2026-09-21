@@ -36,6 +36,7 @@ function inputValue(tool: string, input: ToolCallInput): string {
 async function handleBashParseFailure(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
+	isCurrentSession: () => boolean,
 ): Promise<BlockResult | undefined> {
 	if (!ctx.hasUI) return block("Failed to parse command safely");
 
@@ -44,6 +45,7 @@ async function handleBashParseFailure(
 		"⚠️ Could Not Parse Command Safely",
 		"\nAllow anyway?",
 	);
+	if (!isCurrentSession()) return block("Session changed during approval");
 	return confirmed ? undefined : block("User rejected this invocation");
 }
 
@@ -65,6 +67,7 @@ async function handleInteractiveBash(
 	evaluated: EvaluatedToolCall,
 	ctx: ExtensionContext,
 	sessionRules: Record<string, Record<string, Action>>,
+	isCurrentSession: () => boolean,
 ): Promise<BlockResult | undefined> {
 	const bash = evaluated.bash;
 	if (!bash) return block("Internal evaluation error");
@@ -93,6 +96,7 @@ async function handleInteractiveBash(
 		),
 		choices,
 	);
+	if (!isCurrentSession()) return block("Session changed during approval");
 
 	if (choice === alwaysLabel) {
 		saveBashAllowRules(sessionRules, tool, uniqueBaseNames);
@@ -121,6 +125,7 @@ async function handleInteractiveTool(
 	evaluated: EvaluatedToolCall,
 	ctx: ExtensionContext,
 	sessionRules: Record<string, Record<string, Action>>,
+	isCurrentSession: () => boolean,
 ): Promise<BlockResult | undefined> {
 	const { tool, input } = evaluated.result;
 	const value = inputValue(tool, input);
@@ -131,6 +136,7 @@ async function handleInteractiveTool(
 	const alwaysLabel = `Always allow ${tool} (this session)`;
 	pi.events.emit("nudge", { body: `${tool} needs approval` });
 	const choice = await ctx.ui.select(prompt, ["Allow", alwaysLabel, "Reject"]);
+	if (!isCurrentSession()) return block("Session changed during approval");
 	if (choice === alwaysLabel) {
 		sessionRules[tool] = { ...sessionRules[tool], "*": "allow" };
 		return;
@@ -146,14 +152,28 @@ export async function enforceToolEvaluation(
 	evaluated: EvaluatedToolCall,
 	ctx: ExtensionContext,
 	sessionRules: Record<string, Record<string, Action>>,
+	isCurrentSession: () => boolean,
 ): Promise<BlockResult | undefined> {
 	const { result } = evaluated;
 	if (result.disposition === "bypass" || result.disposition === "allow") return;
 	if (result.disposition === "deny") return block("Security policy");
-	if (result.parserError) return handleBashParseFailure(pi, ctx);
+	if (result.parserError)
+		return handleBashParseFailure(pi, ctx, isCurrentSession);
 	if (!ctx.hasUI) return block("No interactive session available");
 	if (evaluated.bash) {
-		return handleInteractiveBash(pi, evaluated, ctx, sessionRules);
+		return handleInteractiveBash(
+			pi,
+			evaluated,
+			ctx,
+			sessionRules,
+			isCurrentSession,
+		);
 	}
-	return handleInteractiveTool(pi, evaluated, ctx, sessionRules);
+	return handleInteractiveTool(
+		pi,
+		evaluated,
+		ctx,
+		sessionRules,
+		isCurrentSession,
+	);
 }

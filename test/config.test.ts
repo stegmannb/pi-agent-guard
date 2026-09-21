@@ -10,6 +10,7 @@ import {
 	validateToolRules,
 } from "../src/config.ts";
 import { DEFAULT_CONFIG } from "../src/defaults.ts";
+import { resolveBashAction } from "../src/matching.ts";
 
 test("GLOBAL_SETTINGS_PATH respects PI_CODING_AGENT_DIR", async () => {
 	const previous = process.env.PI_CODING_AGENT_DIR;
@@ -310,6 +311,23 @@ test("buildEffectiveRules", async (t) => {
 		if (typeof result === "object") {
 			assert.equal(result.npm, "deny");
 		}
+	});
+
+	await t.test("specific find deny survives a session allow for find", () => {
+		const result = buildEffectiveRules(
+			{ bash: { "find /": "deny" } },
+			{},
+			undefined,
+			undefined,
+			{ bash: { find: "allow" } },
+		);
+		assert.ok(typeof result === "object");
+		const bash = result.bash;
+		assert.ok(typeof bash === "object");
+		assert.equal(
+			resolveBashAction("find", ["/", "-maxdepth", "4"], bash),
+			"deny",
+		);
 	});
 
 	await t.test("single action session rules win over all", () => {

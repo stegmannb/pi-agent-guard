@@ -132,6 +132,17 @@ export function registerGuard(
 		sessionRules: {},
 		exactSessionGrants: [],
 	};
+	let sessionGeneration = 0;
+	let sessionActive = true;
+
+	function resetSessionState(): void {
+		sessionGeneration++;
+		sessionActive = true;
+		context.activeProfile = undefined;
+		context.sessionRules = {};
+		context.exactSessionGrants = [];
+		delete context.sessionEnabled;
+	}
 
 	function reviewerStatus(ctx: ExtensionContext): string {
 		return `Reviewer: ${reviewerConfig.mode} · ${formatReviewerModelStatus(resolveReviewerModel(reviewerConfig, ctx))}`;
@@ -163,23 +174,18 @@ export function registerGuard(
 		);
 	}
 
-	async function runReviewerModelCommand(
-		target: string,
+	function notifyUnavailableReviewerPicker(ctx: ExtensionCommandContext): void {
+		if (!ctx.hasUI)
+			ctx.ui.notify(
+				"Reviewer model picker is unavailable here. Use /guard model main or /guard model <provider>/<model-id>.",
+				"warning",
+			);
+	}
+
+	function applyReviewerModelChoice(
+		choice: string,
 		ctx: ExtensionCommandContext,
-	): Promise<void> {
-		if (target === "status") {
-			ctx.ui.notify(reviewerStatus(ctx), "info");
-			return;
-		}
-		const choice = target || (await pickReviewerModel(ctx, reviewerConfig));
-		if (!choice) {
-			if (!target && !ctx.hasUI)
-				ctx.ui.notify(
-					"Reviewer model picker is unavailable here. Use /guard model main or /guard model <provider>/<model-id>.",
-					"warning",
-				);
-			return;
-		}
+	): void {
 		const result = setReviewerSessionModel(pi, ctx, choice);
 		ctx.ui.notify(
 			result.ok
@@ -188,6 +194,24 @@ export function registerGuard(
 			result.ok ? "info" : "warning",
 		);
 		if (result.ok) updateGuardStatus(ctx);
+	}
+
+	async function runReviewerModelCommand(
+		target: string,
+		ctx: ExtensionCommandContext,
+	): Promise<void> {
+		if (target === "status") {
+			ctx.ui.notify(reviewerStatus(ctx), "info");
+			return;
+		}
+		const generation = sessionGeneration;
+		const choice = target || (await pickReviewerModel(ctx, reviewerConfig));
+		if (!sessionActive || generation !== sessionGeneration) return;
+		if (!choice) {
+			if (!target) notifyUnavailableReviewerPicker(ctx);
+			return;
+		}
+		applyReviewerModelChoice(choice, ctx);
 	}
 
 	async function runGuardCommand(
@@ -231,13 +255,37 @@ export function registerGuard(
 	});
 
 	registerGuardCheck(pi, context);
-	pi.on("session_start", async (_event, ctx) => updateGuardStatus(ctx));
-	pi.on("session_switch", async (_event, ctx) => updateGuardStatus(ctx));
-	pi.on("session_fork", async (_event, ctx) => updateGuardStatus(ctx));
+	pi.on("session_start", async (_event, ctx) => {
+		resetSessionState();
+		updateGuardStatus(ctx);
+	});
+	pi.on("session_switch", async (_event, ctx) => {
+		resetSessionState();
+		updateGuardStatus(ctx);
+	});
+	pi.on("session_fork", async (_event, ctx) => {
+		resetSessionState();
+		updateGuardStatus(ctx);
+	});
+	pi.on("session_shutdown", async () => {
+		resetSessionState();
+		sessionActive = false;
+	});
 	pi.on("session_tree", async (_event, ctx) => updateGuardStatus(ctx));
 	pi.on("model_select", async (_event, ctx) => updateGuardStatus(ctx));
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "guard_check") return;
+		if (!sessionActive)
+			return {
+				block: true,
+				reason: "[Blocked by pi-guard: Session is no longer active]",
+			};
+		const generation = sessionGeneration;
+		const sessionId = ctx.sessionManager.getSessionId();
+		const isCurrentSession = () =>
+			sessionActive &&
+			sessionGeneration === generation &&
+			ctx.sessionManager.getSessionId() === sessionId;
 		const snapshot = buildPolicySnapshot(context);
 		const evaluated = evaluateToolCall(
 			snapshot,
@@ -245,7 +293,19 @@ export function registerGuard(
 			event.input as ToolCallInput,
 			ctx.cwd,
 		);
-		return enforceToolEvaluation(pi, evaluated, ctx, context.sessionRules);
+		const result = await enforceToolEvaluation(
+			pi,
+			evaluated,
+			ctx,
+			context.sessionRules,
+			isCurrentSession,
+		);
+		return isCurrentSession()
+			? result
+			: {
+					block: true,
+					reason: "[Blocked by pi-guard: Session changed during approval]",
+				};
 	});
 }
 
