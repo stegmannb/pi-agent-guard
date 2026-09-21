@@ -14,10 +14,18 @@ import { enforceToolEvaluation } from "./handlers.ts";
 import { buildPolicySnapshot, filterPolicySnapshot } from "./policy.ts";
 import type { GuardContext, ToolCallInput } from "./types.ts";
 
+export {
+	captureReviewerConversation,
+	createReviewerRequest,
+	parseReviewerJudgment,
+	reviewGuardRequest,
+} from "./reviewer.ts";
+export { loadReviewerConfigFromSettings } from "./reviewer-config.ts";
 export { parseGuardArgs };
 
 interface LoadedStartupConfig extends LoadedConfigResult {
 	envRules?: GuardContext["staticPolicy"]["envRules"];
+	reviewerError?: string;
 }
 
 export interface GuardBootstrap {
@@ -85,7 +93,11 @@ export function registerGuard(
 		bootstrap.projectResult !== undefined
 			? bootstrap.projectResult
 			: loadProjectConfig(startupCwd);
-	const warnings = [loaded.warning, projectResult?.warning].filter(Boolean);
+	const warnings = [
+		loaded.warning,
+		loaded.reviewerError,
+		projectResult?.warning,
+	].filter(Boolean);
 	if (warnings.length > 0) console.warn(`[pi-guard] ${warnings.join("; ")}`);
 
 	const context: GuardContext = {

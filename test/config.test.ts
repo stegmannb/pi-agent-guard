@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import {
@@ -25,6 +27,38 @@ test("GLOBAL_SETTINGS_PATH respects PI_CODING_AGENT_DIR", async () => {
 		} else {
 			process.env.PI_CODING_AGENT_DIR = previous;
 		}
+	}
+});
+
+test("saving pattern configuration preserves global reviewer settings", async () => {
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-guard-save-"));
+	process.env.PI_CODING_AGENT_DIR = agentDir;
+	try {
+		const settingsPath = path.join(agentDir, "settings.json");
+		fs.writeFileSync(
+			settingsPath,
+			JSON.stringify({
+				guard: { reviewer: { mode: "auto", policy: "Ask on uncertainty" } },
+			}),
+		);
+		const module = await import(`../src/config.ts?save-reviewer=${Date.now()}`);
+		module.saveConfig({
+			enabled: true,
+			rules: { bash: { "git status": "allow" } },
+		});
+		const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as {
+			guard: { reviewer: { mode: string; policy: string }; rules: unknown };
+		};
+		assert.deepEqual(settings.guard.reviewer, {
+			mode: "auto",
+			policy: "Ask on uncertainty",
+		});
+		assert.deepEqual(settings.guard.rules, { bash: { "git status": "allow" } });
+	} finally {
+		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previous;
+		fs.rmSync(agentDir, { recursive: true, force: true });
 	}
 });
 

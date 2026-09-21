@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { DEFAULT_CONFIG } from "./defaults.ts";
+import { loadReviewerConfigFromSettings } from "./reviewer-config.ts";
 import type { Action, GuardConfig, Rules, ToolRules } from "./types.ts";
 
 // ── Constants ──
@@ -299,7 +300,16 @@ function loadProjectConfig(
 	try {
 		const data = fs.readFileSync(projectSettingsPath, "utf-8");
 		const parsed = JSON.parse(data);
-		return getGuardConfigFromSettings(parsed);
+		const result = getGuardConfigFromSettings(parsed);
+		if (parsed?.guard?.reviewer !== undefined) {
+			result.warning = [
+				result.warning,
+				"Project guard.reviewer is ignored; configure it globally.",
+			]
+				.filter(Boolean)
+				.join("; ");
+		}
+		return result;
 	} catch {
 		return {
 			config: { ...SAFE_FALLBACK_CONFIG },
@@ -343,18 +353,27 @@ export function loadConfig() {
 			const data = fs.readFileSync(SETTINGS_PATH, "utf-8");
 			const parsed = JSON.parse(data);
 			const result = getGuardConfigFromSettings(parsed);
-			return { ...result, envRules };
+			return {
+				...result,
+				...loadReviewerConfigFromSettings(parsed, AGENT_DIR),
+				envRules,
+			};
 		} catch {
 			return {
 				config: { ...SAFE_FALLBACK_CONFIG },
 				warning:
 					"Failed to parse settings.json; using safe fallback (enabled=true, rules={}).",
 				envRules,
+				reviewer: loadReviewerConfigFromSettings(undefined, AGENT_DIR).reviewer,
 			};
 		}
 	}
 
-	return { config: { ...SAFE_FALLBACK_CONFIG }, envRules };
+	return {
+		config: { ...SAFE_FALLBACK_CONFIG },
+		envRules,
+		reviewer: loadReviewerConfigFromSettings(undefined, AGENT_DIR).reviewer,
+	};
 }
 
 export function saveConfig(config: GuardConfig) {
@@ -366,6 +385,7 @@ export function saveConfig(config: GuardConfig) {
 			settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf-8"));
 		}
 
+		const existingGuard = settings.guard;
 		settings.guard = {
 			enabled: config.enabled,
 			...(config.matchers &&
@@ -381,6 +401,12 @@ export function saveConfig(config: GuardConfig) {
 				Object.keys(config.shortcuts).length > 0 && {
 					shortcuts: config.shortcuts,
 				}),
+			...(existingGuard &&
+			typeof existingGuard === "object" &&
+			!Array.isArray(existingGuard) &&
+			"reviewer" in existingGuard
+				? { reviewer: existingGuard.reviewer }
+				: {}),
 		};
 
 		fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), "utf-8");

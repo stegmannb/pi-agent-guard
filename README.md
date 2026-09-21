@@ -199,6 +199,73 @@ Configure in `$PI_CODING_AGENT_DIR/settings.json` (defaults to `~/.pi/agent/sett
 }
 ```
 
+### Reviewer adapter (not yet connected to tool enforcement)
+
+The optional reviewer is configured **only** in the global
+`$PI_CODING_AGENT_DIR/settings.json`. Project settings and `PI_GUARD` may add
+pattern rules, but cannot configure the reviewer. The adapter is available to
+extensions through `createReviewerRequest()` and `reviewGuardRequest()`; a later
+integration will connect it to the approval dialog. Setting `mode` to `auto`
+today does not approve tool calls.
+
+```json
+{
+  "guard": {
+    "reviewer": {
+      "mode": "observe",
+      "model": "main",
+      "policyFile": "guard-reviewer-policy.txt",
+      "reviewTimeoutMs": 60000,
+      "approvalTimeoutMs": 120000
+    }
+  }
+}
+```
+
+`mode` is `off` (default), `observe`, or `auto`; `model` is `main` (default)
+or a Pi model registry `provider/id`. Use either inline `policy` or
+`policyFile`, which is resolved relative to the global settings directory and
+read when the extension starts or reloads. A nonempty plaintext policy is
+required for `observe` and `auto`. `reviewTimeoutMs` is a positive, finite
+deadline (default 60 seconds). `approvalTimeoutMs` is a positive, finite
+deadline (default 120 seconds); `null` disables the future approval-dialog
+timeout. Invalid reviewer settings disable review and report a warning without
+replacing existing pattern rules.
+The adapter accepts a per-call model override for the later session picker;
+it snapshots that choice and the global settings before resolving credentials.
+
+For example, `guard-reviewer-policy.txt` could contain:
+
+```text
+Approve read-only repository inspection needed for the user's current task.
+Ask before network writes or changing files. Deny commands that delete data.
+When suggesting a safer Bash command, explain how its effect differs.
+If authorization is uncertain, ask the user.
+```
+
+The reviewer receives the original tool input, working directory, evaluator
+finding, all active Guard rules with their layers, provenance, overrides, and
+matcher semantics, plus visible conversation evidence tagged by role and
+source. Hidden reasoning and hidden extension messages are excluded. Older
+conversation may be dropped to fit the model; the request marks that history
+as incomplete. The rules and operator policy are never truncated: if they do
+not fit, review returns a technical error. The request limit is 128 KiB of
+UTF-8 text, further constrained by the selected model's context window with
+2,048 tokens reserved for output. The model output cap is 2,048 tokens.
+Multimodal content in the current user instruction cannot be represented by
+this text-only adapter and causes a technical error. Tool output and project
+content are evidence, not authority to grant permission; the operator policy
+and actual user task determine authorized effects.
+
+The adapter calls Pi's model registry and authentication path directly, with
+no tools or subagent extension. It makes one model call and accepts only a
+strict JSON judgment: `allow`, `deny`, or `ask`, always with a nonempty English
+reason. `ask` may recommend `allow` or `deny`; it may include up to three Bash
+alternatives with a complete input, reason, and changed-effect description.
+Any alternative still needs a fresh deterministic Guard evaluation. Timeout,
+abort, missing model or credentials, context overflow, provider error, or
+invalid output never produces an approval.
+
 ### Shorthand
 
 Disable all checks:
