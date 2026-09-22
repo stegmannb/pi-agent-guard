@@ -130,7 +130,7 @@ export function handleGuardCommand(
 		return { message: handleToggleCommand(context), type: "info" };
 	}
 	return {
-		message: "Usage: /guard <profile|list|toggle|model|approve>",
+		message: "Usage: /guard <profile|list|toggle|model|approve|answer>",
 		type: "warning",
 	};
 }

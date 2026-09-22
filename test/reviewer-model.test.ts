@@ -99,7 +99,10 @@ function harness() {
 		cwd: "/repo",
 		ui,
 		modelRegistry: registry,
-		sessionManager: { getBranch: () => entries },
+		sessionManager: {
+			getBranch: () => entries,
+			getSessionId: () => "reviewer-model-session",
+		},
 		get model() {
 			return main;
 		},

@@ -16,6 +16,7 @@ import {
 } from "./config.ts";
 import { evaluateToolCall } from "./evaluator.ts";
 import { buildPolicySnapshot, filterPolicySnapshot } from "./policy.ts";
+import { RequiredDecisionController } from "./required-decision.ts";
 import {
 	DEFAULT_REVIEWER_CONFIG,
 	type ReviewerConfig,
@@ -142,11 +143,13 @@ export function registerGuard(
 		reviewerConfig,
 		bootstrap.autoReview,
 	);
+	const requiredDecision = new RequiredDecisionController(pi);
 	let sessionGeneration = 0;
 	let sessionActive = true;
 
 	function resetSessionState(): void {
 		autoReview.sessionChanged();
+		requiredDecision.sessionChanged();
 		sessionGeneration++;
 		sessionActive = true;
 		context.activeProfile = undefined;
@@ -236,6 +239,11 @@ export function registerGuard(
 			ctx.ui.notify(result.message, result.ok ? "info" : "warning");
 			return;
 		}
+		if (action === "answer") {
+			const result = requiredDecision.answer(target, ctx);
+			ctx.ui.notify(result.message, result.ok ? "info" : "warning");
+			return;
+		}
 		const result = handleGuardCommand(action, target, context);
 		const modelStatus = reviewerStatus(ctx);
 		ctx.ui.notify(
@@ -271,22 +279,33 @@ export function registerGuard(
 	});
 
 	registerGuardCheck(pi, context);
+	requiredDecision.registerTool();
 	pi.on("session_start", async (_event, ctx) => {
 		resetSessionState();
+		requiredDecision.restore(ctx);
 		updateGuardStatus(ctx);
 	});
-	pi.on("session_before_switch", async () => autoReview.abortPending());
-	pi.on("session_before_fork", async () => autoReview.abortPending());
+	pi.on("session_before_switch", async () => {
+		autoReview.abortPending();
+		requiredDecision.sessionChanged();
+	});
+	pi.on("session_before_fork", async () => {
+		autoReview.abortPending();
+		requiredDecision.sessionChanged();
+	});
 	pi.on("session_before_tree", async () => {
 		autoReview.abortPending();
+		requiredDecision.sessionChanged();
 		sessionGeneration++;
 	});
 	pi.on("session_switch", async (_event, ctx) => {
 		resetSessionState();
+		requiredDecision.restore(ctx);
 		updateGuardStatus(ctx);
 	});
 	pi.on("session_fork", async (_event, ctx) => {
 		resetSessionState();
+		requiredDecision.restore(ctx);
 		updateGuardStatus(ctx);
 	});
 	pi.on("session_shutdown", async () => {
@@ -295,12 +314,26 @@ export function registerGuard(
 	});
 	pi.on("session_tree", async (_event, ctx) => {
 		autoReview.branchChanged();
+		requiredDecision.restore(ctx);
 		sessionGeneration++;
 		updateGuardStatus(ctx);
 	});
 	pi.on("model_select", async (_event, ctx) => updateGuardStatus(ctx));
-	pi.on("input", async () => autoReview.newUserInput());
+	pi.on("input", async (event, ctx) => {
+		const blocked = requiredDecision.input(event.text, event.source, ctx);
+		if (blocked) return blocked;
+		autoReview.newUserInput();
+	});
+	pi.on("message_end", async (event) => {
+		if (event.message.role === "user")
+			requiredDecision.userMessage(event.message.content);
+	});
+	pi.on("message_start", async (event) => {
+		if (event.message.role === "assistant")
+			requiredDecision.assistantMessageStarted();
+	});
 	pi.on("tool_result", async (event) => {
+		requiredDecision.toolResult(event.toolName, event.toolCallId);
 		const result = autoReview.toolResult(event);
 		autoReview.newUserInput();
 		return result;
@@ -309,6 +342,9 @@ export function registerGuard(
 		autoReview.toolExecutionEnd(event),
 	);
 	pi.on("tool_call", async (event, ctx) => {
+		const decisionResult = requiredDecision.preflight(event, ctx);
+		if (decisionResult || event.toolName === "guard_require_decision")
+			return decisionResult;
 		if (event.toolName === "guard_check") return;
 		if (!sessionActive)
 			return {
