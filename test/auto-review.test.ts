@@ -320,12 +320,39 @@ test("observe keeps human approval and no UI blocks even if reviewer says allow"
 	});
 	assert.equal(await interactive.call("mysteryctl inspect"), undefined);
 	assert.equal(interactive.askCalls(), 1);
+	assert.equal(
+		(interactive.presentation() as { reasonLabel: string }).reasonLabel,
+		"Reviewer assessment (allow)",
+	);
 	const headless = setup({ mode: "observe", hasUI: false });
 	assert.match(
 		(await headless.call("mysteryctl inspect"))?.reason ?? "",
 		/Human approval required/,
 	);
 	assert.equal(headless.askCalls(), 0);
+});
+
+test("observe keeps a reviewer deny visible in the human dialog", async () => {
+	const fake = setup({
+		mode: "observe",
+		result: {
+			ok: true,
+			mode: "observe",
+			model: "fake/main",
+			judgment: {
+				decision: "deny",
+				recommendation: null,
+				reason: "Remote write is outside the task.",
+				alternatives: [],
+			},
+		},
+		ask: { kind: "choice", choice: "deny" },
+	});
+	assert.equal((await fake.call("git push origin main"))?.block, true);
+	assert.equal(
+		(fake.presentation() as { reasonLabel: string }).reasonLabel,
+		"Reviewer assessment (deny)",
+	);
 });
 
 test("suggest allow asks with Allow once selected, while neutral ask has no recommendation", async () => {
@@ -352,6 +379,14 @@ test("suggest allow asks with Allow once selected, while neutral ask has no reco
 		assert.equal(
 			(fake.presentation() as { recommendation: string | null }).recommendation,
 			recommendation,
+		);
+		assert.equal(
+			(fake.presentation() as { reason: string }).reason,
+			"Ask the operator.",
+		);
+		assert.equal(
+			(fake.presentation() as { reasonLabel: string }).reasonLabel,
+			"Reviewer assessment (ask)",
 		);
 	}
 });
@@ -566,6 +601,10 @@ test("technical failure asks conservatively and normal approval timeout blocks",
 	const response = await fake.call("mysteryctl inspect");
 	assert.match(response?.reason ?? "", /approval_timeout/);
 	assert.equal(fake.askCalls(), 1);
+	assert.equal(
+		(fake.presentation() as { reasonLabel: string }).reasonLabel,
+		"Review status (timeout)",
+	);
 	assert.equal(
 		(fake.audit[0] as { humanDecision: string }).humanDecision,
 		"approval_timeout",
@@ -782,6 +821,7 @@ test("RPC uses a flat standard selector without an autonomous approval timeout",
 		cwd: "/workspace",
 		recommendation: "deny",
 		reason: "Check destination",
+		reasonLabel: "Reviewer assessment",
 		options: approvalOptions(true, true, [
 			{ input: { command: "git status" } },
 		]),
@@ -789,6 +829,7 @@ test("RPC uses a flat standard selector without an autonomous approval timeout",
 	});
 	assert.deepEqual(result, { kind: "choice", choice: "deny" });
 	assert.match(title, /Timeout paused: input activity unavailable/);
+	assert.match(title, /Reviewer assessment: Check destination/);
 	assert.equal(options[0], "Deny");
 	assert.ok(
 		options.some((option) =>
@@ -924,6 +965,7 @@ test("terminal approval with disabled timeout remains open until a choice", asyn
 			cwd: "/workspace",
 			recommendation: "allow",
 			reason: "Read only",
+			reasonLabel: "Reviewer assessment",
 			options: approvalOptions(false, false, []),
 			timeoutMs: null,
 		},
@@ -931,6 +973,7 @@ test("terminal approval with disabled timeout remains open until a choice", asyn
 			result = value;
 		},
 	);
+	assert.match(dialog.render(60).join("\n"), /Reviewer assessment: Read only/);
 	assert.match(dialog.render(60).join("\n"), /No timeout/);
 	dialog.handleInput("\x1b[6~");
 	assert.doesNotMatch(dialog.render(60).join("\n"), /Resume timeout/);

@@ -10,6 +10,7 @@ import {
 } from "./config.ts";
 import type { EvaluatedToolCall } from "./evaluator.ts";
 import {
+	approvalReasons,
 	buildApprovalPrompt,
 	buildCustomApprovalPrompt,
 	buildFileApprovalPrompt,
@@ -18,6 +19,10 @@ import { getCommandName } from "./resolve.ts";
 import type { Action, ToolCallInput } from "./types.ts";
 
 type BlockResult = { block: true; reason: string };
+
+function withApprovalReasons(prompt: string, reasons: string[]): string {
+	return `${prompt}\n\nWhy approval is required:\n${reasons.map((reason) => `- ${reason}`).join("\n")}`;
+}
 
 function block(reason: string): BlockResult {
 	return { block: true, reason: `[Blocked by pi-guard: ${reason}]` };
@@ -88,11 +93,14 @@ async function handleInteractiveBash(
 
 	pi.events.emit("nudge", { body: "Command needs approval" });
 	const choice = await ctx.ui.select(
-		buildApprovalPrompt(
-			bash.allCommands,
-			bash.askCommands,
-			undefined,
-			bash.expandedWrappers,
+		withApprovalReasons(
+			buildApprovalPrompt(
+				bash.allCommands,
+				bash.askCommands,
+				undefined,
+				bash.expandedWrappers,
+			),
+			approvalReasons(evaluated.result),
 		),
 		choices,
 	);
@@ -129,10 +137,14 @@ async function handleInteractiveTool(
 ): Promise<BlockResult | undefined> {
 	const { tool, input } = evaluated.result;
 	const value = inputValue(tool, input);
-	const prompt =
+	const commandPrompt =
 		tool === "read" || tool === "edit" || tool === "write"
 			? buildFileApprovalPrompt(tool, value)
 			: buildCustomApprovalPrompt(tool, value);
+	const prompt = withApprovalReasons(
+		commandPrompt,
+		approvalReasons(evaluated.result),
+	);
 	const alwaysLabel = `Always allow ${tool} (this session)`;
 	pi.events.emit("nudge", { body: `${tool} needs approval` });
 	const choice = await ctx.ui.select(prompt, ["Allow", alwaysLabel, "Reject"]);
@@ -159,7 +171,10 @@ export async function enforceToolEvaluation(
 	if (result.disposition === "deny") return block("Security policy");
 	if (result.parserError)
 		return handleBashParseFailure(pi, ctx, isCurrentSession);
-	if (!ctx.hasUI) return block("No interactive session available");
+	if (!ctx.hasUI)
+		return block(
+			`No interactive session available; ${approvalReasons(result).join(" ")}`,
+		);
 	if (evaluated.bash) {
 		return handleInteractiveBash(
 			pi,

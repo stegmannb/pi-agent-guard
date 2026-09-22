@@ -9,13 +9,17 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_CONFIG } from "../src/defaults.ts";
 import { registerGuard } from "../src/index.ts";
+import type { Rules } from "../src/types.ts";
 
 type ToolCallHandler = (
 	event: ToolCallEvent,
 	ctx: ExtensionContext,
 ) => Promise<ToolCallEventResult | undefined>;
 
-function harness(hasUI = true) {
+function harness(
+	hasUI = true,
+	rules: Rules = { bash: { "*": "ask", echo: "allow", rm: "deny" } },
+) {
 	let toolCallHandler: ToolCallHandler | undefined;
 	let guardCheck: ToolDefinition | undefined;
 	const hooks = new Map<string, ToolCallHandler>();
@@ -52,7 +56,7 @@ function harness(hasUI = true) {
 			config: {
 				enabled: true,
 				matchers: DEFAULT_CONFIG.matchers,
-				rules: { bash: { "*": "ask", echo: "allow", rm: "deny" } },
+				rules,
 			},
 		},
 		projectResult: null,
@@ -185,6 +189,51 @@ test("tool_call uses UI for an ask and guard_check remains read-only", async () 
 	);
 	assert.equal(hookResult, undefined);
 	assert.equal(fake.selectCalls(), 1);
+});
+
+test("pattern asks explain every matching rule in the normal dialog", async () => {
+	const fake = harness(true, {
+		bash: { "*": "allow", "git push": "ask", curl: "ask" },
+	});
+	let prompt = "";
+	const ui = fake.ctx.ui as {
+		select: (text: string, choices: string[]) => Promise<string | undefined>;
+	};
+	ui.select = async (text) => {
+		prompt = text;
+		return "Reject";
+	};
+	const result = await fake.getHandler()(
+		{
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "pattern-ask",
+			input: { command: "git push origin main && curl example.com" },
+		} as ToolCallEvent,
+		fake.ctx,
+	);
+	assert.equal(result?.block, true);
+	assert.match(prompt, /Why approval is required:/);
+	assert.match(prompt, /Rule "git push" for bash \(user\) requires approval/);
+	assert.match(prompt, /Rule "curl" for bash \(user\) requires approval/);
+	assert.doesNotMatch(prompt, /Reviewer assessment/);
+});
+
+test("headless pattern asks return the policy reason to the agent", async () => {
+	const fake = harness(false, { bash: { "*": "allow", "git push": "ask" } });
+	const result = await fake.getHandler()(
+		{
+			type: "tool_call",
+			toolName: "bash",
+			toolCallId: "headless-pattern-ask",
+			input: { command: "git push origin main" },
+		} as ToolCallEvent,
+		fake.ctx,
+	);
+	assert.match(
+		result?.reason ?? "",
+		/Rule "git push" for bash \(user\) requires approval/,
+	);
 });
 
 test("tree navigation invalidates pending legacy approval without clearing session rules", async () => {

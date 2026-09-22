@@ -34,8 +34,13 @@ export interface ApprovalPresentation {
 	cwd: string;
 	recommendation: "allow" | "deny" | null;
 	reason: string;
+	reasonLabel?: string;
 	options: ApprovalOption[];
 	timeoutMs: number | null;
+}
+
+function reasonLine(presentation: ApprovalPresentation): string {
+	return `${presentation.reasonLabel ?? "Reason"}: ${presentation.reason}`;
 }
 
 export interface ApprovalClock {
@@ -272,7 +277,7 @@ export class ApprovalDialog {
 					? `${bar} Timeout paused · ${seconds} s remaining`
 					: `${bar} Auto-deny in ${seconds} s`;
 		this.header.setText(
-			`Cwd: ${p.cwd}\nRecommendation: ${p.recommendation ?? "Ask"}\nReason: ${p.reason}\nCommand:\n${p.command}`,
+			`Cwd: ${p.cwd}\nRecommendation: ${p.recommendation ?? "Ask"}\n${reasonLine(p)}\nCommand:\n${p.command}`,
 		);
 		const details = this.header.render(width);
 		const options = this.editingFeedback
@@ -345,7 +350,7 @@ export async function askApproval(
 	const labels = ordered.map(rpcOptionLabel);
 	try {
 		const picked = await ctx.ui.select(
-			`Guard approval required\nCwd: ${presentation.cwd}\nCommand: ${presentation.command}\nRecommendation: ${presentation.recommendation ?? "Ask"}\nReason: ${presentation.reason}\nTimeout paused: input activity unavailable`,
+			`Guard approval required\nCwd: ${presentation.cwd}\nCommand: ${presentation.command}\nRecommendation: ${presentation.recommendation ?? "Ask"}\n${reasonLine(presentation)}\nTimeout paused: input activity unavailable`,
 			labels,
 			signal ? { signal } : {},
 		);
