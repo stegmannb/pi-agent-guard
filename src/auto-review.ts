@@ -372,7 +372,6 @@ export class AutoReviewController {
 		run: ReviewRun,
 		result: ReviewerResult,
 		alternatives: string[],
-		source: string,
 		reason: string,
 	): Promise<{
 		outcome: ToolCallEventResult | undefined;
@@ -388,7 +387,10 @@ export class AutoReviewController {
 			command: String(run.evaluated.result.input.command ?? ""),
 			cwd: run.ctx.cwd,
 			recommendation: result.ok ? result.judgment.recommendation : null,
-			reason: `${source}: ${reason}`,
+			reason: reason,
+			reasonLabel: result.ok
+				? `Reviewer assessment (${result.judgment.decision})`
+				: `Review status (${result.error})`,
 			options,
 			timeoutMs: this.config.approvalTimeoutMs,
 		};
@@ -473,13 +475,7 @@ export class AutoReviewController {
 				),
 			);
 		} else {
-			const answer = await this.askUser(
-				run,
-				result,
-				alternatives,
-				source,
-				reason,
-			);
+			const answer = await this.askUser(run, result, alternatives, reason);
 			outcome = answer.outcome;
 			humanDecision = answer.humanDecision;
 			if (!outcome)

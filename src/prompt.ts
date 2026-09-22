@@ -1,10 +1,35 @@
 import { formatCommand, truncate } from "./format.ts";
-import type { CommandRef } from "./types.ts";
+import type { CommandRef, GuardEvaluation, WinningRule } from "./types.ts";
 import { formatWrapperDisplay } from "./wrappers.ts";
 
 export interface ApprovalPromptOptions {
 	maxLength?: number;
 	argMaxLength?: number;
+}
+
+function describeApprovalRule(
+	rule: WinningRule | undefined,
+	tool: string,
+): string {
+	if (!rule) return "No rule matched; approval is required by default.";
+	if (rule.scope === "global")
+		return `Global policy (${rule.layer}) requires approval.`;
+	if (rule.scope === "tool")
+		return `Rule for ${tool} (${rule.layer}) requires approval.`;
+	return `Rule ${JSON.stringify(rule.pattern)} for ${tool} (${rule.layer}) requires approval.`;
+}
+
+/** Explain the policy decision without presenting it as the agent's intent. */
+export function approvalReasons(result: GuardEvaluation): string[] {
+	const askCommands = result.commands?.filter(
+		(command) => command.action === "ask",
+	);
+	const rules = askCommands?.length
+		? askCommands.map((command) => command.winningRule)
+		: [result.winningRule];
+	return [
+		...new Set(rules.map((rule) => describeApprovalRule(rule, result.tool))),
+	];
 }
 
 export function buildApprovalPrompt(

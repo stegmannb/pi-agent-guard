@@ -32,10 +32,17 @@ The prompt looks like:
 
 ✖ rm -rf dist/
 
+Why approval is required:
+- Rule "*" for bash (default) requires approval.
+
 → Allow
   Always allow rm (this session)
   Reject
 ```
+
+The remaining examples focus on command formatting. Pattern-based approval
+prompts also show the rules that require approval. This is a policy explanation,
+not a statement of the agent's intent.
 
 For commands with pipes and subshells, each sub-command is checked independently. When the agent runs:
 
@@ -123,7 +130,9 @@ https://api.github.com/repos/jdiamond/pi-guard/issues
   Reject
 ```
 
-In non-interactive mode (e.g., CI), unauthorized commands are silently blocked without a prompt.
+In non-interactive mode (e.g., CI), an `ask` call is blocked without a prompt.
+The tool result includes the policy reason so the agent can try another command
+or report the blocker.
 
 A `deny` result is final for the complete tool call. If any command in a pipeline, subshell, wrapper, or compound expression is denied, pi-guard blocks the tool call before opening an approval prompt.
 
@@ -258,8 +267,9 @@ picker. Each review captures the model at its start. A later selection affects
 only later calls.
 
 The approval dialog shows the full command, working directory, recommendation,
-and reason. Its options are flat: `Allow once`, `Allow for this session`,
-available project and global rule saves, `Deny`, `Give feedback`, and any
+and the reviewer's reason labeled `Reviewer assessment`, including the reviewer's
+decision. If review fails, the dialog labels the failure `Review status`. Its options are flat: `Allow once`,
+`Allow for this session`, available project and global rule saves, `Deny`, `Give feedback`, and any
 reviewer alternatives. `Allow for this session` covers only the exact full
 input in the current directory for this Pi session. Project and global saves
 retain their wider command-name rule scope, which the dialog labels. Feedback
