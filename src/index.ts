@@ -287,15 +287,15 @@ export function registerGuard(
 	});
 	pi.on("session_before_switch", async () => {
 		autoReview.abortPending();
-		requiredDecision.sessionChanged();
+		requiredDecision.abortDialog();
 	});
 	pi.on("session_before_fork", async () => {
 		autoReview.abortPending();
-		requiredDecision.sessionChanged();
+		requiredDecision.abortDialog();
 	});
 	pi.on("session_before_tree", async () => {
 		autoReview.abortPending();
-		requiredDecision.sessionChanged();
+		requiredDecision.abortDialog();
 		sessionGeneration++;
 	});
 	pi.on("session_switch", async (_event, ctx) => {

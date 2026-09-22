@@ -447,13 +447,21 @@ export class RequiredDecisionController {
 			);
 	}
 
-	sessionChanged(): void {
+	abortDialog(): void {
+		if (!this.dialogAbort) return;
 		this.generation++;
-		if (this.dialogAbort && this.pending) {
-			this.persist("cancelled", this.pending);
-		}
-		this.dialogAbort?.abort();
+		if (this.pending) this.persist("cancelled", this.pending);
+		this.dialogAbort.abort();
 		this.dialogAbort = undefined;
+		this.pending = undefined;
+		this.reservedCallId = undefined;
+		this.delivery = undefined;
+		this.completedDelivery = undefined;
+	}
+
+	sessionChanged(): void {
+		this.abortDialog();
+		this.generation++;
 		this.pending = undefined;
 		this.reservedCallId = undefined;
 		this.delivery = undefined;

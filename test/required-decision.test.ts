@@ -569,6 +569,48 @@ test("switching sessions dismisses and cancels an active dialog", async () => {
 	);
 });
 
+test("a cancelled session, fork, or tree transition keeps a headless decision gated", async () => {
+	for (const eventName of [
+		"session_before_switch",
+		"session_before_fork",
+		"session_before_tree",
+	]) {
+		const fake = harness(false);
+		const originalError = console.error;
+		console.error = () => undefined;
+		try {
+			await fake.preflight("guard_require_decision", "ask", fake.input);
+			await fake.execute("ask");
+		} finally {
+			console.error = originalError;
+		}
+		const id = pendingId(fake);
+		// Another extension cancels navigation, so Pi emits no post-transition event.
+		await fake.hooks.get(eventName)?.({ type: eventName }, fake.ctx);
+		assert.equal(
+			(fake.branch().at(-1)?.data as { status: string }).status,
+			"pending",
+		);
+		assert.match(
+			(
+				(await fake.preflight("bash", "blocked", { command: "echo safe" })) as {
+					reason: string;
+				}
+			).reason,
+			new RegExp(id),
+		);
+		assert.equal(
+			(
+				(await fake.hooks.get("input")?.(
+					{ type: "input", text: "continue", source: "interactive" },
+					fake.ctx,
+				)) as { action: string }
+			).action,
+			"handled",
+		);
+	}
+});
+
 test("headless no-session mode reports that the request cannot survive exit", async () => {
 	const fake = harness(false, false);
 	await fake.preflight("guard_require_decision", "ask", fake.input);
