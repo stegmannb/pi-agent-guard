@@ -36,6 +36,21 @@ export function isReviewerModelSetting(
 	);
 }
 
+function findReviewerModel(
+	ctx: ExtensionContext,
+	setting: string,
+): PiModel | undefined {
+	const separator = setting.indexOf("/");
+	const provider = setting.slice(0, separator);
+	const id = setting.slice(separator + 1);
+	return (
+		ctx.modelRegistry.find(provider, id) ??
+		(ctx.model?.provider === provider && ctx.model.id === id
+			? ctx.model
+			: undefined)
+	);
+}
+
 /** Read only the current branch line, so forks and tree navigation inherit correctly. */
 export function readSessionModelOverride(
 	entries: SessionEntry[],
@@ -101,11 +116,7 @@ export function resolveReviewerModel(
 		};
 	}
 	try {
-		const separator = setting.indexOf("/");
-		const model = ctx.modelRegistry.find(
-			setting.slice(0, separator),
-			setting.slice(separator + 1),
-		);
+		const model = findReviewerModel(ctx, setting);
 		if (!model)
 			return {
 				source,
@@ -113,7 +124,7 @@ export function resolveReviewerModel(
 				model: undefined,
 				error: `Reviewer model ${setting} is unavailable.`,
 			};
-		if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+		if (model !== ctx.model && !ctx.modelRegistry.hasConfiguredAuth(model)) {
 			return {
 				source,
 				setting,
@@ -155,22 +166,10 @@ export function setReviewerSessionModel(
 	if (value !== "main") {
 		try {
 			ctx.modelRegistry.refresh();
-			const separator = value.indexOf("/");
-			const model = ctx.modelRegistry.find(
-				value.slice(0, separator),
-				value.slice(separator + 1),
-			);
+			const model = findReviewerModel(ctx, value);
 			if (!model)
 				return { ok: false, reason: `Unknown reviewer model: ${value}` };
-			if (
-				!ctx.modelRegistry
-					.getAvailable()
-					.some(
-						(available) =>
-							available.provider === model.provider &&
-							available.id === model.id,
-					)
-			) {
+			if (model !== ctx.model && !ctx.modelRegistry.hasConfiguredAuth(model)) {
 				return {
 					ok: false,
 					reason: `Reviewer model ${value} has no configured authentication.`,
@@ -230,8 +229,24 @@ export class ReviewerModelSelector extends Container {
 		};
 		if (typeof prototype.dispose === "function") {
 			const runtime = {
-				getAvailableSnapshot: () => registry.getAvailable(),
-				getModel: (provider: string, id: string) => registry.find(provider, id),
+				getAvailableSnapshot: () => {
+					const models = registry.getAvailable();
+					if (
+						currentModel &&
+						!models.some(
+							(model) =>
+								model.provider === currentModel.provider &&
+								model.id === currentModel.id,
+						)
+					)
+						return [...models, currentModel];
+					return models;
+				},
+				getModel: (provider: string, id: string) =>
+					registry.find(provider, id) ??
+					(currentModel?.provider === provider && currentModel.id === id
+						? currentModel
+						: undefined),
 				getError: () => registry.getError(),
 				refresh: async (options: unknown) => {
 					const refresh = registry.refresh as (...args: unknown[]) => unknown;
@@ -331,9 +346,10 @@ export async function pickReviewerModel(
 	// RPC supports standard select dialogs but not custom TUI components.
 	try {
 		ctx.modelRegistry.refresh();
-		const choices = ctx.modelRegistry
-			.getAvailable()
-			.map((model) => `${model.provider}/${model.id}`);
+		const available = await ctx.modelRegistry.getAvailable();
+		const choices = available.map((model) => `${model.provider}/${model.id}`);
+		if (ctx.model && !choices.includes(`${ctx.model.provider}/${ctx.model.id}`))
+			choices.push(`${ctx.model.provider}/${ctx.model.id}`);
 		const followMain = "Follow current main model";
 		const selected = await ctx.ui.select(
 			`Reviewer model (${current.source}: ${current.setting})`,

@@ -97,7 +97,10 @@ function harness() {
 		setStatus: (_key: string, value: string) => statuses.push(value),
 		theme: { fg: (_color: string, value: string) => value },
 		custom: async () => undefined,
-		select: async (): Promise<string | undefined> => undefined,
+		select: async (
+			_title: string,
+			_choices: string[],
+		): Promise<string | undefined> => undefined,
 	};
 	const ctx = {
 		hasUI: true,
@@ -215,6 +218,7 @@ test("invalid direct selection, absent auth and corrupt persisted entry never fa
 	assert.equal(setReviewerSessionModel(h.pi, h.ctx, "wrong").ok, false);
 	assert.equal(setReviewerSessionModel(h.pi, h.ctx, "test/missing").ok, false);
 	h.setAvailable([alpha]);
+	h.setMain(alpha);
 	assert.equal(
 		setReviewerSessionModel(h.pi, h.ctx, "test/family/beta").ok,
 		false,
@@ -317,8 +321,46 @@ test("Pi 0.86 native picker uses the extension registry adapter without changing
 	}
 });
 
+test("active model remains selectable when the registry catalogue omits it", async () => {
+	initForkTheme("dark", false);
+	const h = harness();
+	const active = model("openai", "gpt-6-luna");
+	h.setMain(active);
+	assert.equal(
+		setReviewerSessionModel(h.pi, h.ctx, "openai/gpt-6-luna").ok,
+		true,
+	);
+	assert.equal(resolveReviewerModel(config, h.ctx).model, active);
+	let selected = "";
+	const picker = new ReviewerModelSelector(
+		{ requestRender() {} } as unknown as TUI,
+		active,
+		h.ctx.modelRegistry,
+		(item) => {
+			selected = `${item.provider}/${item.id}`;
+		},
+		() => {},
+		() => {},
+		"Reviewer model: openai/gpt-6-luna [session]",
+		[],
+		ForkModelSelector as unknown as typeof ModelSelectorComponent,
+	);
+	try {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		for (const key of "gpt-6-luna") picker.handleInput(key);
+		picker.handleInput("\r");
+		assert.equal(selected, "openai/gpt-6-luna");
+	} finally {
+		picker.dispose();
+	}
+});
+
 test("RPC uses standard selector, cancellation preserves choice, print has no hanging picker", async () => {
 	const h = harness();
+	h.registry.getAvailable = (async () => [
+		alpha,
+		beta,
+	]) as unknown as typeof h.registry.getAvailable;
 	assert.equal(setReviewerSessionModel(h.pi, h.ctx, "test/alpha").ok, true);
 	let selects = 0;
 	h.ui.custom = async () => undefined; // RPC does not invoke the factory
@@ -334,6 +376,16 @@ test("RPC uses standard selector, cancellation preserves choice, print has no ha
 	const printContext = { ...h.ctx, hasUI: false } as ExtensionCommandContext;
 	assert.equal(await pickReviewerModel(printContext, config), undefined);
 	assert.equal(selects, 1);
+});
+
+test("RPC picker lists an active model outside the available catalogue", async () => {
+	const h = harness();
+	h.setMain(model("openai", "gpt-6-luna"));
+	h.ui.select = async (_title, choices) => {
+		assert.ok(choices.includes("openai/gpt-6-luna"));
+		return "openai/gpt-6-luna";
+	};
+	assert.equal(await pickReviewerModel(h.ctx, config), "openai/gpt-6-luna");
 });
 
 test("guard command persists only valid choices, reports status, and refreshes after session events", async () => {
