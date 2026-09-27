@@ -240,7 +240,8 @@ model call.
   "guard": {
     "reviewer": {
       "mode": "observe",
-      "model": "main",
+      "model": "openai/gpt-6-luna",
+      "thinkingLevel": "xhigh",
       "policyFile": "guard-reviewer-policy.txt",
       "reviewTimeoutMs": 60000,
       "approvalTimeoutMs": 120000
@@ -249,8 +250,12 @@ model call.
 }
 ```
 
-`mode` is `off` (default), `observe`, or `auto`; `model` is `main` (default)
-or a Pi model registry `provider/id`. Use either inline `policy` or
+`mode` is `off` (default), `observe`, or `auto`; `model` is a Pi model registry
+`provider/id` (default `openai/gpt-6-luna`) or `main`. `thinkingLevel` is
+`minimal`, `low`, `medium`, `high`, `xhigh` (default), or `null`. Guard passes
+a non-null value as Pi's `completeSimple` `reasoning` option for reviewer
+calls only. With `null`, it omits the option. A model or provider may limit
+the effective level. Use either inline `policy` or
 `policyFile`, which is resolved relative to the global settings directory and
 read when the extension starts or reloads. A nonempty plaintext policy is
 required for `observe` and `auto`. `reviewTimeoutMs` is a positive, finite
@@ -274,8 +279,8 @@ current main model again, or use `/guard model main`. To select directly, use
 line and `/guard list` show the same information.
 
 A session choice takes precedence over the global `guard.reviewer.model`,
-which defaults to `main`; `main` follows subsequent changes of the working
-model. The choice is stored on the current Pi session branch, survives resume,
+which defaults to `openai/gpt-6-luna`; `main` follows subsequent changes of the
+working model. The choice is stored on the current Pi session branch, survives resume,
 and is inherited only by forks from that branch. A new independent session
 starts with the global setting. Selecting a model never writes Pi's main-model
 defaults or changes its active model. RPC uses a standard selection dialog;

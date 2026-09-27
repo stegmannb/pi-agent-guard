@@ -59,6 +59,7 @@ const beta = model("test", "family/beta");
 const config: ReviewerConfig = {
 	mode: "off",
 	model: "test/alpha",
+	thinkingLevel: null,
 	policy: "",
 	reviewTimeoutMs: 60_000,
 	approvalTimeoutMs: 120_000,

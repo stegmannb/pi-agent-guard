@@ -17,12 +17,16 @@ import {
 	type ReviewerDependencies,
 	reviewGuardRequest,
 } from "../src/reviewer.ts";
-import { loadReviewerConfigFromSettings } from "../src/reviewer-config.ts";
+import {
+	loadReviewerConfigFromSettings,
+	type ReviewerConfig,
+} from "../src/reviewer-config.ts";
 import type { GuardContext } from "../src/types.ts";
 
 const config = {
 	mode: "auto" as const,
 	model: "main" as const,
+	thinkingLevel: null,
 	policy: "Permit read-only git inspection. Ask when uncertain.",
 	reviewTimeoutMs: 1000,
 	approvalTimeoutMs: 120_000,
@@ -141,6 +145,7 @@ test("global reviewer configuration is validated and resolves policy once", () =
 					reviewer: {
 						mode: "observe",
 						model: "test/fake",
+						thinkingLevel: "xhigh",
 						policyFile: "policy.txt",
 						approvalTimeoutMs: null,
 					},
@@ -150,12 +155,36 @@ test("global reviewer configuration is validated and resolves policy once", () =
 		);
 		assert.equal(result.reviewerError, undefined);
 		assert.equal(result.reviewer.policy, "Only read-only commands.\n");
+		assert.equal(result.reviewer.thinkingLevel, "xhigh");
 		assert.equal(result.reviewer.approvalTimeoutMs, null);
 		assert.equal(result.reviewer.reviewTimeoutMs, 60_000);
 		const defaults = loadReviewerConfigFromSettings({}, dir).reviewer;
 		assert.equal(defaults.mode, "off");
+		assert.equal(defaults.model, "openai/gpt-6-luna");
+		assert.equal(defaults.thinkingLevel, "xhigh");
 		assert.equal(defaults.reviewTimeoutMs, 60_000);
 		assert.equal(defaults.approvalTimeoutMs, 120_000);
+		const enabledDefaults = loadReviewerConfigFromSettings(
+			{ guard: { reviewer: { mode: "observe", policy: "x" } } },
+			dir,
+		).reviewer;
+		assert.equal(enabledDefaults.model, "openai/gpt-6-luna");
+		assert.equal(enabledDefaults.thinkingLevel, "xhigh");
+		const overrides = loadReviewerConfigFromSettings(
+			{
+				guard: {
+					reviewer: {
+						mode: "observe",
+						policy: "x",
+						model: "main",
+						thinkingLevel: null,
+					},
+				},
+			},
+			dir,
+		).reviewer;
+		assert.equal(overrides.model, "main");
+		assert.equal(overrides.thinkingLevel, null);
 		assert.equal(
 			loadReviewerConfigFromSettings(
 				{
@@ -180,6 +209,8 @@ test("global reviewer configuration is validated and resolves policy once", () =
 			{ mode: "auto", policy: "x", reviewTimeoutMs: 0 },
 			{ mode: "auto", policy: "x", approvalTimeoutMs: -1 },
 			{ mode: "auto", policy: "x", model: "bad" },
+			{ mode: "auto", policy: "x", thinkingLevel: "none" },
+			{ mode: "auto", policy: "x", thinkingLevel: 3 },
 			{ mode: "auto", policyFile: "missing" },
 		]) {
 			const invalid = loadReviewerConfigFromSettings(
@@ -512,6 +543,54 @@ test("explicit reviewer model is pinned without changing the main model", async 
 	);
 	assert.equal(nested.ok, true);
 	assert.equal(resolvedId, "folder/fake");
+});
+
+test("reviewer thinking level is passed only to its model call", async () => {
+	const mainModel = structuredClone(model);
+	const callOptions: unknown[] = [];
+	const deps = dependencies(judgment("deny"), {
+		spy: (_context, options) => callOptions.push(options),
+	});
+	deps.mainModel = mainModel;
+	assert.equal(
+		(
+			await reviewGuardRequest(
+				fixture(),
+				{ ...config, thinkingLevel: "xhigh" },
+				deps,
+			)
+		).ok,
+		true,
+	);
+	assert.equal((callOptions[0] as { reasoning?: string }).reasoning, "xhigh");
+	assert.equal(mainModel.reasoning, false);
+	assert.equal((await reviewGuardRequest(fixture(), config, deps)).ok, true);
+	assert.equal("reasoning" in (callOptions[1] as object), false);
+	const invalid = await reviewGuardRequest(
+		fixture(),
+		{ ...config, thinkingLevel: "none" as ReviewerConfig["thinkingLevel"] },
+		deps,
+	);
+	assert.equal(invalid.ok, false);
+	assert.equal(invalid.ok ? undefined : invalid.error, "configuration");
+	assert.equal(callOptions.length, 2);
+});
+
+test("reviewer parses judgment text after a thinking block", async () => {
+	const deps = dependencies(judgment("allow"));
+	deps.complete = (async () => ({
+		stopReason: "stop",
+		content: [
+			{ type: "thinking", thinking: "Private reasoning" },
+			{ type: "text", text: judgment("allow") },
+		],
+	})) as unknown as NonNullable<ReviewerDependencies["complete"]>;
+	const result = await reviewGuardRequest(
+		fixture(),
+		{ ...config, thinkingLevel: "xhigh" },
+		deps,
+	);
+	assert.equal(result.ok && result.judgment.decision, "allow");
 });
 
 test("missing mandatory context, errors and truncation never produce an approval", async () => {

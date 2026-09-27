@@ -110,6 +110,7 @@ function identity(
 				policyVersion: snapshot.policyVersion,
 				mode: config.mode,
 				policy: config.policy,
+				thinkingLevel: config.thinkingLevel,
 				modelKey,
 				reviewTimeoutMs: config.reviewTimeoutMs,
 				approvalTimeoutMs: config.approvalTimeoutMs,

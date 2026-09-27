@@ -338,6 +338,7 @@ test("an exact session approval is visible to guard_check through the live evalu
 			reviewer: {
 				mode: "auto",
 				model: "main",
+				thinkingLevel: null,
 				policy: "Ask before remote changes",
 				reviewTimeoutMs: 60_000,
 				approvalTimeoutMs: 120_000,
@@ -479,6 +480,7 @@ test("registered tool_call uses session reviewer and tool_result keeps original 
 			reviewer: {
 				mode: "auto",
 				model: "main",
+				thinkingLevel: null,
 				policy: "Allow inspection",
 				reviewTimeoutMs: 60_000,
 				approvalTimeoutMs: 120_000,

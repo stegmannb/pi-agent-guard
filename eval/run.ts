@@ -132,6 +132,7 @@ if (
 						{
 							...(options?.signal ? { signal: options.signal } : {}),
 							...(options?.maxTokens ? { maxTokens: options.maxTokens } : {}),
+							...(options?.reasoning ? { reasoning: options.reasoning } : {}),
 							...(options?.apiKey ? { apiKey: options.apiKey } : {}),
 							...(options?.headers ? { headers: options.headers } : {}),
 						},
@@ -143,6 +144,7 @@ if (
 				{
 					mode: "observe",
 					model: modelSetting as `${string}/${string}`,
+					thinkingLevel: null,
 					policy: fixture.policy,
 					reviewTimeoutMs: 60_000,
 					approvalTimeoutMs: 120_000,

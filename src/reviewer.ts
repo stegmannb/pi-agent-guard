@@ -384,6 +384,20 @@ export async function reviewGuardRequest(
 		};
 	}
 	if (
+		settings.thinkingLevel !== null &&
+		settings.thinkingLevel !== "minimal" &&
+		settings.thinkingLevel !== "low" &&
+		settings.thinkingLevel !== "medium" &&
+		settings.thinkingLevel !== "high" &&
+		settings.thinkingLevel !== "xhigh"
+	) {
+		return {
+			ok: false,
+			error: "configuration",
+			reason: "Reviewer thinking level is invalid.",
+		};
+	}
+	if (
 		!request.evaluation.reviewEligible ||
 		request.evaluation.patternAction !== "ask" ||
 		!request.evaluation.guardEnabled
@@ -503,6 +517,9 @@ export async function reviewGuardRequest(
 				{
 					signal: controller.signal,
 					maxTokens: OUTPUT_TOKENS,
+					...(settings.thinkingLevel === null
+						? {}
+						: { reasoning: settings.thinkingLevel }),
 					...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
 					...(auth.headers ? { headers: auth.headers } : {}),
 				},
@@ -511,16 +528,21 @@ export async function reviewGuardRequest(
 		]);
 		if (
 			response.stopReason !== "stop" ||
-			response.content.some((part) => part.type !== "text")
+			response.content.some(
+				(part) => part.type !== "text" && part.type !== "thinking",
+			)
 		) {
 			return {
 				ok: false,
 				error: "response",
-				reason: `Reviewer returned ${response.stopReason} or non-text output.`,
+				reason: `Reviewer returned ${response.stopReason} or tool output.`,
 			};
 		}
 		const judgment = parseReviewerJudgment(
-			response.content.map((part) => (part as { text: string }).text).join(""),
+			response.content
+				.filter((part) => part.type === "text")
+				.map((part) => part.text)
+				.join(""),
 		);
 		if (!judgment)
 			return {

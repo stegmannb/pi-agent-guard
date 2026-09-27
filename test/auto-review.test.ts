@@ -56,6 +56,7 @@ function baseConfig(mode: ReviewerConfig["mode"] = "auto"): ReviewerConfig {
 	return {
 		mode,
 		model: "main",
+		thinkingLevel: null,
 		policy: "Allow authorized read-only inspection; ask when uncertain.",
 		reviewTimeoutMs: 60_000,
 		approvalTimeoutMs: 120_000,

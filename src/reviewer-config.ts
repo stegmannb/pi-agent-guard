@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import type { ThinkingLevel } from "@mariozechner/pi-ai";
 
 export type ReviewerMode = "off" | "observe" | "auto";
 
@@ -7,6 +8,7 @@ export type ReviewerMode = "off" | "observe" | "auto";
 export interface ReviewerConfig {
 	mode: ReviewerMode;
 	model: "main" | `${string}/${string}`;
+	thinkingLevel: ThinkingLevel | null;
 	policy: string;
 	reviewTimeoutMs: number;
 	approvalTimeoutMs: number | null;
@@ -19,7 +21,8 @@ export interface ReviewerConfigResult {
 
 export const DEFAULT_REVIEWER_CONFIG: ReviewerConfig = {
 	mode: "off",
-	model: "main",
+	model: "openai/gpt-6-luna",
+	thinkingLevel: "xhigh",
 	policy: "",
 	reviewTimeoutMs: 60_000,
 	approvalTimeoutMs: 120_000,
@@ -54,6 +57,7 @@ export function loadReviewerConfigFromSettings(
 			![
 				"mode",
 				"model",
+				"thinkingLevel",
 				"policy",
 				"policyFile",
 				"reviewTimeoutMs",
@@ -66,12 +70,28 @@ export function loadReviewerConfigFromSettings(
 	const mode = raw.mode ?? "off";
 	if (mode !== "off" && mode !== "observe" && mode !== "auto")
 		return fail("mode must be off, observe, or auto");
-	const model = raw.model ?? "main";
+	const model = raw.model ?? DEFAULT_REVIEWER_CONFIG.model;
 	if (
 		typeof model !== "string" ||
 		(model !== "main" && !/^[^/\s]+\/[^/\s][^\s]*$/.test(model))
 	) {
 		return fail("model must be main or provider/id");
+	}
+	const thinkingLevel =
+		raw.thinkingLevel === undefined
+			? DEFAULT_REVIEWER_CONFIG.thinkingLevel
+			: raw.thinkingLevel;
+	if (
+		thinkingLevel !== null &&
+		thinkingLevel !== "minimal" &&
+		thinkingLevel !== "low" &&
+		thinkingLevel !== "medium" &&
+		thinkingLevel !== "high" &&
+		thinkingLevel !== "xhigh"
+	) {
+		return fail(
+			"thinkingLevel must be minimal, low, medium, high, xhigh, or null",
+		);
 	}
 	if (raw.policy !== undefined && raw.policyFile !== undefined)
 		return fail("set policy or policyFile, not both");
@@ -108,6 +128,7 @@ export function loadReviewerConfigFromSettings(
 		reviewer: {
 			mode,
 			model: model as ReviewerConfig["model"],
+			thinkingLevel,
 			policy,
 			reviewTimeoutMs,
 			approvalTimeoutMs,

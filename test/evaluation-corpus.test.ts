@@ -107,6 +107,7 @@ test("curated reviewer corpus traverses the registered hooks without executing c
 					reviewer: {
 						mode: "auto",
 						model: "main",
+						thinkingLevel: null,
 						policy: fixture.policy,
 						reviewTimeoutMs: 60_000,
 						approvalTimeoutMs: 120_000,
