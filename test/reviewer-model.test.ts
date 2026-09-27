@@ -3,12 +3,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
+import {
+	ModelSelectorComponent as ForkModelSelector,
+	initTheme as initForkTheme,
+} from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import {
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
 	initTheme,
+	type ModelSelectorComponent,
 } from "@mariozechner/pi-coding-agent";
 import type { TUI } from "@mariozechner/pi-tui";
 import { DEFAULT_CONFIG } from "../src/defaults.ts";
@@ -275,6 +280,40 @@ test("native selector searches registry and its save side effect stays in memory
 		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previous;
 		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("Pi 0.86 native picker uses the extension registry adapter without changing main", async () => {
+	initForkTheme("dark", false);
+	const h = harness();
+	let selected = "";
+	const picker = new ReviewerModelSelector(
+		{ requestRender() {} } as unknown as TUI,
+		alpha,
+		h.ctx.modelRegistry,
+		(item) => {
+			selected = `${item.provider}/${item.id}`;
+		},
+		() => {
+			selected = "cancelled";
+		},
+		() => {
+			selected = "main";
+		},
+		"Reviewer model: test/alpha [global]",
+		[],
+		ForkModelSelector as unknown as typeof ModelSelectorComponent,
+	);
+	try {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		assert.match(picker.render(80).join("\n"), /test\/alpha|alpha/);
+		for (const key of "beta") picker.handleInput(key);
+		assert.equal(picker.getSearchInput().getValue(), "beta");
+		picker.handleInput("\r");
+		assert.equal(selected, "test/family/beta");
+		assert.equal(h.ctx.model?.id, "family/beta");
+	} finally {
+		picker.dispose();
 	}
 });
 

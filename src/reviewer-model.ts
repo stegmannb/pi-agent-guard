@@ -5,7 +5,7 @@ import {
 	ModelSelectorComponent,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import { matchesKey, Text, type TUI } from "@mariozechner/pi-tui";
+import { Container, matchesKey, Text, type TUI } from "@mariozechner/pi-tui";
 import type { ReviewerConfig } from "./reviewer-config.ts";
 
 type SessionEntry = ReturnType<
@@ -194,9 +194,18 @@ export function setReviewerSessionModel(
 	return { ok: true, model: value };
 }
 
-/** Pi's native selector saves to its SettingsManager; this one is always isolated. */
-export class ReviewerModelSelector extends ModelSelectorComponent {
+/** Keep the native picker while adapting the two Pi constructor contracts. */
+export class ReviewerModelSelector extends Container {
+	private readonly selector: ModelSelectorComponent;
 	private readonly onMain: () => void;
+
+	get focused(): boolean {
+		return this.selector.focused;
+	}
+
+	set focused(value: boolean) {
+		this.selector.focused = value;
+	}
 
 	constructor(
 		tui: TUI,
@@ -206,28 +215,78 @@ export class ReviewerModelSelector extends ModelSelectorComponent {
 		onCancel: () => void,
 		onMain: () => void,
 		currentStatus: string,
+		scopedModels: ReadonlyArray<{
+			model: PiModel;
+			thinkingLevel?: string;
+		}> = [],
+		PickerComponent: typeof ModelSelectorComponent = ModelSelectorComponent,
 	) {
-		super(
-			tui,
-			currentModel,
-			SettingsManager.inMemory(),
-			registry,
-			[],
-			onSelect,
-			onCancel,
-		);
+		super();
+		// Pi 0.86's picker uses ModelRuntime and refreshes it in the background.
+		// The extension API exposes a ModelRegistry facade, so supply only the
+		// public runtime operations that the native picker calls.
+		const prototype = PickerComponent.prototype as ModelSelectorComponent & {
+			dispose?: () => void;
+		};
+		if (typeof prototype.dispose === "function") {
+			const runtime = {
+				getAvailableSnapshot: () => registry.getAvailable(),
+				getModel: (provider: string, id: string) => registry.find(provider, id),
+				getError: () => registry.getError(),
+				refresh: async (options: unknown) => {
+					const refresh = registry.refresh as (...args: unknown[]) => unknown;
+					const result = await refresh.call(registry, options);
+					return result ?? { errors: new Map(), aborted: false };
+				},
+			};
+			const NativeSelector = PickerComponent as unknown as new (
+				...args: unknown[]
+			) => ModelSelectorComponent;
+			this.selector = new NativeSelector(
+				tui,
+				currentModel,
+				runtime,
+				scopedModels,
+				onSelect,
+				onCancel,
+			);
+		} else {
+			// Older Pi writes its selected model to SettingsManager. Keep that
+			// manager in memory so the reviewer's choice never changes main.
+			this.selector = new PickerComponent(
+				tui,
+				currentModel,
+				SettingsManager.inMemory(),
+				registry,
+				scopedModels,
+				onSelect,
+				onCancel,
+			);
+		}
+		this.addChild(this.selector);
 		this.onMain = onMain;
 		this.addChild(
 			new Text(`${currentStatus}\nAlt+M — Follow the current main model`, 0, 0),
 		);
 	}
 
-	override handleInput(data: string): void {
+	handleInput(data: string): void {
 		if (matchesKey(data, "alt+m")) {
 			this.onMain();
 			return;
 		}
-		super.handleInput(data);
+		this.selector.handleInput(data);
+	}
+
+	getSearchInput(): ReturnType<ModelSelectorComponent["getSearchInput"]> {
+		return this.selector.getSearchInput();
+	}
+
+	dispose(): void {
+		const selector = this.selector as ModelSelectorComponent & {
+			dispose?: () => void;
+		};
+		selector.dispose?.();
 	}
 }
 
@@ -250,6 +309,14 @@ export async function pickReviewerModel(
 					() => done(undefined),
 					() => done("main"),
 					formatReviewerModelStatus(current),
+					(
+						ctx as ExtensionCommandContext & {
+							scopedModels?: ReadonlyArray<{
+								model: PiModel;
+								thinkingLevel?: string;
+							}>;
+						}
+					).scopedModels ?? [],
 				);
 			},
 		);

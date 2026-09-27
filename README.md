@@ -347,6 +347,11 @@ Guard runs inside the Pi process. Protecting the global reviewer policy file
 from the working agent's file writes requires the host sandbox or deployment
 configuration; Guard does not provide separate OS isolation.
 
+The [reviewer integration acceptance and evaluation guide](docs/reviewer-evaluation.md)
+maps the offline tests to this contract, records terminal and RPC observations,
+and describes an optional review-only model evaluation. Passing offline tests
+does not enable `auto` or establish a model safety rate.
+
 ### Shorthand
 
 Disable all checks:

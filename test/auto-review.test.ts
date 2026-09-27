@@ -15,6 +15,7 @@ import type {
 	ToolCallEvent,
 	ToolResultEvent,
 } from "@mariozechner/pi-coding-agent";
+import { visibleWidth } from "@mariozechner/pi-tui";
 import {
 	type ApprovalClock,
 	ApprovalDialog,
@@ -1005,12 +1006,21 @@ test("narrow, low terminal keeps the flat options visible and scrolls long detai
 	);
 	const first = dialog.render(40);
 	assert.ok(first.length <= 12);
+	assert.ok(first.every((line) => visibleWidth(line) <= 40));
 	assert.match(first.join("\n"), /Deny/);
-	assert.match(first.join("\n"), /PageUp\/PageDown/);
+	assert.match(first.join("\n"), /PgUp\/PgDn/);
+	for (let index = 0; index < 3; index++) dialog.handleInput("\x1b[A");
+	const sessionScope = dialog.render(40);
+	assert.ok(sessionScope.length <= 12);
+	assert.match(
+		sessionScope.join("\n"),
+		/Scope: exact command \+ cwd, this session/,
+	);
 	dialog.handleInput("\x1b[6~");
 	assert.match(dialog.render(40).join("\n"), /exact repository/);
 	dialog.handleInput("\x1b[6~");
 	assert.match(dialog.render(40).join("\n"), /&& echo a very long command/);
+	assert.ok(dialog.render(40).every((line) => visibleWidth(line) <= 40));
 	dialog.dispose();
 });
 

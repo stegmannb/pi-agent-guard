@@ -5,6 +5,8 @@ import {
 	SelectList,
 	Text,
 	type TUI,
+	truncateToWidth,
+	visibleWidth,
 } from "@mariozechner/pi-tui";
 
 export type ApprovalChoice =
@@ -260,22 +262,38 @@ export class ApprovalDialog {
 		this.tui.requestRender();
 	}
 
+	private timeoutStatus(width: number): string {
+		if (this.remainingMs === null) return "No timeout";
+		const seconds = Math.ceil(this.remainingMs / 1000);
+		const suffix = this.paused
+			? ` Timeout paused · ${seconds} s remaining`
+			: ` Auto-deny in ${seconds} s`;
+		const barWidth = Math.min(
+			20,
+			Math.max(0, width - visibleWidth(suffix) - 2),
+		);
+		const filled = Math.ceil(
+			(barWidth * this.remainingMs) / (this.presentation.timeoutMs ?? 1),
+		);
+		return `[${"█".repeat(filled)}${"░".repeat(barWidth - filled)}]${suffix}`;
+	}
+
+	private selectedScope(width: number): string | undefined {
+		if (width >= 60 || this.editingFeedback) return undefined;
+		switch (this.list.getSelectedItem()?.value) {
+			case "allow-session":
+				return "Scope: exact command + cwd, this session";
+			case "allow-project":
+				return "Scope: command-name rule in project";
+			case "allow-global":
+				return "Scope: command-name rule globally";
+			default:
+				return undefined;
+		}
+	}
+
 	render(width: number): string[] {
 		const p = this.presentation;
-		const seconds =
-			this.remainingMs === null ? 0 : Math.ceil(this.remainingMs / 1000);
-		const total = p.timeoutMs ?? 1;
-		const filled =
-			this.remainingMs === null
-				? 0
-				: Math.ceil((20 * this.remainingMs) / total);
-		const bar = `[${"█".repeat(filled)}${"░".repeat(20 - filled)}]`;
-		const status =
-			this.remainingMs === null
-				? "No timeout"
-				: this.paused
-					? `${bar} Timeout paused · ${seconds} s remaining`
-					: `${bar} Auto-deny in ${seconds} s`;
 		this.header.setText(
 			`Cwd: ${p.cwd}\nRecommendation: ${p.recommendation ?? "Ask"}\n${reasonLine(p)}\nCommand:\n${p.command}`,
 		);
@@ -283,9 +301,10 @@ export class ApprovalDialog {
 		const options = this.editingFeedback
 			? ["Feedback to agent:", ...this.input.render(width)]
 			: this.list.render(width);
+		const compactScope = this.selectedScope(width);
 		const detailHeight = Math.max(
 			1,
-			this.tui.terminal.rows - options.length - 5,
+			this.tui.terminal.rows - options.length - 5 - (compactScope ? 1 : 0),
 		);
 		const start = Math.min(
 			this.scrollOffset,
@@ -297,13 +316,14 @@ export class ApprovalDialog {
 			...visible,
 			...(details.length > detailHeight
 				? [
-						`Details ${start + 1}-${start + visible.length}/${details.length} · PageUp/PageDown to scroll`,
+						`Details ${start + 1}-${start + visible.length}/${details.length} · ${width < 60 ? "PgUp/PgDn" : "PageUp/PageDown"} to scroll`,
 					]
 				: []),
-			status,
+			this.timeoutStatus(width),
 			"",
 			...options,
-		];
+			...(compactScope ? [compactScope] : []),
+		].map((line) => truncateToWidth(line, width));
 	}
 
 	invalidate(): void {

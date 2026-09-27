@@ -23,11 +23,12 @@
 	"files": [
 		"index.ts",
 		"src",
+		"docs",
 		"README.md"
 	],
 	"type": "module",
 	"scripts": {
-		"test": "node --test test/**/*.ts",
+		"test": "node --test test/*.test.ts",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome check",
 		"lint:fix": "biome check --write",
@@ -48,12 +49,15 @@
 	"peerDependencies": {
 		"@mariozechner/pi-ai": "*",
 		"@mariozechner/pi-coding-agent": "*",
+		"@mariozechner/pi-tui": "*",
 		"typebox": "*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.11",
-		"@mariozechner/pi-ai": "*",
-		"@mariozechner/pi-coding-agent": "*",
+		"@earendil-works/pi-coding-agent": "0.86.1",
+		"@mariozechner/pi-ai": "0.63.1",
+		"@mariozechner/pi-coding-agent": "0.63.1",
+		"@mariozechner/pi-tui": "0.63.1",
 		"@types/minimatch": "^5.1.2",
 		"@types/node": "^25",
 		"typebox": "1.1.28",
