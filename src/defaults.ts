@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import type { GuardConfig } from "./types.ts";
 
 export const DEFAULT_CONFIG = {

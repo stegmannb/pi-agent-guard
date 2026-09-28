@@ -1,3 +1,5 @@
+import "./src/loaded-code.ts";
+
 export {
 	captureReviewerConversation,
 	createReviewerRequest,

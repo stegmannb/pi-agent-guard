@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { isDeepStrictEqual } from "node:util";
 import { parse as parseBash, type Script } from "unbash";
 import { extractAllCommandsFromAST } from "./extract.ts";

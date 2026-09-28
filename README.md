@@ -565,3 +565,9 @@ Shortcuts can reference any guard subcommand: `profile`, `list`, or `toggle`.
 | `/guard profile` | Show active profile and available profiles |
 | `/guard profile <name>` | Activate a profile |
 | `/guard profile off` | Deactivate current profile |
+
+### Trusted protection snapshots
+
+Process hosts can verify the initialized Guard instance through the local
+`pasa:protection:snapshot:v1` event. See [the snapshot contract](docs/protection-snapshot.md)
+for file-backed replay, code provenance, child-worktree checks and refusal cases.

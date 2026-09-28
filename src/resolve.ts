@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import type { CommandRef } from "./types.ts";
 
 export function getCommandName(cmd: CommandRef): string {

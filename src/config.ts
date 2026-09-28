@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -16,6 +17,14 @@ const SETTINGS_PATH = path.join(AGENT_DIR, "settings.json");
 
 /** Absolute path to the global pi agent settings file. */
 export const GLOBAL_SETTINGS_PATH = SETTINGS_PATH;
+export const CONFIG_LOCATION_ENV = {
+	PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
+	HOME: process.env.HOME,
+};
+export type ConfigObserver = (
+	path: string,
+	contents: string | undefined,
+) => void;
 
 /** Absolute path to the project-level settings file for the given working directory. */
 export function getProjectSettingsPath(cwd: string): string {
@@ -322,13 +331,16 @@ export function buildEffectiveRules(
 /** Load project-level guard config from .pi/settings.json in the given directory. */
 function loadProjectConfig(
 	cwd: string,
+	observe?: ConfigObserver,
 ): { config: GuardConfig; warning?: string } | null {
 	const projectSettingsPath = path.join(cwd, ".pi", "settings.json");
 	if (!fs.existsSync(projectSettingsPath)) {
+		observe?.(projectSettingsPath, undefined);
 		return null;
 	}
 	try {
 		const data = fs.readFileSync(projectSettingsPath, "utf-8");
+		observe?.(projectSettingsPath, data);
 		const parsed = JSON.parse(data);
 		const result = getGuardConfigFromSettings(parsed);
 		if (parsed?.guard?.reviewer !== undefined) {
@@ -375,17 +387,18 @@ function loadEnvRules(): Rules | undefined {
 	return undefined;
 }
 
-export function loadConfig() {
+export function loadConfig(observe?: ConfigObserver) {
 	const envRules = loadEnvRules();
 
 	if (fs.existsSync(SETTINGS_PATH)) {
 		try {
 			const data = fs.readFileSync(SETTINGS_PATH, "utf-8");
+			observe?.(SETTINGS_PATH, data);
 			const parsed = JSON.parse(data);
 			const result = getGuardConfigFromSettings(parsed);
 			return {
 				...result,
-				...loadReviewerConfigFromSettings(parsed, AGENT_DIR),
+				...loadReviewerConfigFromSettings(parsed, AGENT_DIR, observe),
 				envRules,
 			};
 		} catch {
@@ -399,6 +412,7 @@ export function loadConfig() {
 		}
 	}
 
+	observe?.(SETTINGS_PATH, undefined);
 	return {
 		config: { ...SAFE_FALLBACK_CONFIG },
 		envRules,

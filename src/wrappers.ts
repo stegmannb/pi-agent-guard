@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { parse as parseBash } from "unbash";
 import type { ExtractCtx } from "./extract.ts";
 import { extractAllCommandsFromAST } from "./extract.ts";

@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
 	Input,

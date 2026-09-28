@@ -1,0 +1,2 @@
+patchedDependencies:
+  '@biomejs/biome@2.4.11': patches/@biomejs__biome@2.4.11.patch

@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { formatCommand, truncate } from "./format.ts";
 import type { CommandRef, GuardEvaluation, WinningRule } from "./types.ts";
 import { formatWrapperDisplay } from "./wrappers.ts";

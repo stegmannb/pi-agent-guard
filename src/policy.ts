@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { createHash } from "node:crypto";
 import { DEFAULT_CONFIG } from "./defaults.ts";
 import type {

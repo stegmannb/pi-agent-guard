@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { createHash, randomUUID } from "node:crypto";
 import type { Usage } from "@mariozechner/pi-ai";
 import type {
@@ -167,6 +168,16 @@ export class AutoReviewController {
 	private readonly inFlight = new Map<string, AbortController>();
 	private userEpoch = 0;
 	private sessionEpoch = 0;
+
+	/** Non-file-backed state cannot be replayed into a fresh process. */
+	hasProtectionRuntimeState(): boolean {
+		return (
+			this.denied.size > 0 ||
+			this.repeats.size > 0 ||
+			this.pending.size > 0 ||
+			this.inFlight.size > 0
+		);
+	}
 
 	constructor(
 		pi: ExtensionAPI,

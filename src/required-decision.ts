@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { randomUUID } from "node:crypto";
 import { Type } from "@mariozechner/pi-ai";
 import type {
@@ -134,6 +135,17 @@ export class RequiredDecisionController {
 	private delivery: AnswerDelivery | undefined;
 	private completedDelivery: DecisionRequest | undefined;
 	private generation = 0;
+
+	/** Non-file-backed state cannot be replayed into a fresh process. */
+	hasProtectionRuntimeState(): boolean {
+		return Boolean(
+			this.pending ||
+				this.reservedCallId ||
+				this.dialogAbort ||
+				this.delivery ||
+				this.completedDelivery,
+		);
+	}
 
 	constructor(pi: ExtensionAPI) {
 		this.pi = pi;

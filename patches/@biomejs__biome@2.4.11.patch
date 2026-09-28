@@ -1,0 +1,15 @@
+diff --git a/bin/biome b/bin/biome
+--- a/bin/biome
++++ b/bin/biome
+@@ -5 +5,10 @@
+-function isMusl() {
++function isMusl() {
++	// Nix Node may use glibc while the host's ldd reports musl.
++	try {
++		if (typeof process.report?.getReport === "function" &&
++			process.report.getReport()?.header?.glibcVersionRuntime) {
++			return false;
++		}
++	} catch {
++		// Keep the existing ldd fallback when the report is unavailable.
++	}

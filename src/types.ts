@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import type { Command } from "unbash";
 
 /** A concrete command node together with the source string its positions refer to. */

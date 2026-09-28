@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import type {
 	AssignmentPrefix,
 	CommandExpansionPart,

@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { completeSimple, type Usage } from "@mariozechner/pi-ai";

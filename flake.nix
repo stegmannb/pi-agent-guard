@@ -62,6 +62,7 @@
         {
           default = extension;
           pi-guard = extension;
+          biome-ci = (import nixpkgs { inherit system; }).callPackage ./nix/biome-ci.nix { };
         }
         // lib.optionalAttrs (builtins.elem system runnerSystems) {
           pi = piFor system;

@@ -24,7 +24,11 @@
 		"index.ts",
 		"src",
 		"docs",
-		"README.md"
+		"README.md",
+		"protection-code.json",
+		"pnpm-lock.yaml",
+		"pnpm-workspace.yaml",
+		"patches"
 	],
 	"type": "module",
 	"scripts": {
@@ -34,8 +38,9 @@
 		"lint:fix": "biome check --write",
 		"format": "biome check --write",
 		"format:check": "biome check",
-		"check": "npm run typecheck && npm run lint && npm run format:check",
-		"verify": "npm run check && npm test"
+		"check": "node scripts/protection-manifest.ts --check && npm run typecheck && npm run lint && npm run format:check",
+		"verify": "npm run check && npm test",
+		"protection:manifest": "node scripts/protection-manifest.ts"
 	},
 	"pi": {
 		"extensions": [
@@ -58,6 +63,7 @@
 		"@mariozechner/pi-ai": "0.63.1",
 		"@mariozechner/pi-coding-agent": "0.63.1",
 		"@mariozechner/pi-tui": "0.63.1",
+		"@pasa/pi-sdk": "npm:@mariozechner/pi-coding-agent@0.73.0",
 		"@types/minimatch": "^5.1.2",
 		"@types/node": "^25",
 		"typebox": "1.1.28",

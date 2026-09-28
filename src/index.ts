@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { Type } from "@mariozechner/pi-ai";
 import type {
 	ExtensionAPI,
@@ -16,6 +17,10 @@ import {
 } from "./config.ts";
 import { evaluateToolCall } from "./evaluator.ts";
 import { buildPolicySnapshot, filterPolicySnapshot } from "./policy.ts";
+import {
+	ConfigurationCapture,
+	ProtectionSnapshot,
+} from "./protection-snapshot.ts";
 import { RequiredDecisionController } from "./required-decision.ts";
 import {
 	DEFAULT_REVIEWER_CONFIG,
@@ -107,14 +112,16 @@ function registerGuardCheck(pi: ExtensionAPI, context: GuardContext): void {
 
 export function registerGuard(
 	pi: ExtensionAPI,
-	bootstrap: GuardBootstrap = {},
+	bootstrap?: GuardBootstrap,
 ): void {
-	const loaded = bootstrap.loaded ?? loadConfig();
-	const startupCwd = bootstrap.startupCwd ?? process.cwd();
+	const options = bootstrap ?? {};
+	const configurationCapture = new ConfigurationCapture();
+	const loaded = options.loaded ?? loadConfig(configurationCapture.observe);
+	const startupCwd = options.startupCwd ?? process.cwd();
 	const projectResult =
-		bootstrap.projectResult !== undefined
-			? bootstrap.projectResult
-			: loadProjectConfig(startupCwd);
+		options.projectResult !== undefined
+			? options.projectResult
+			: loadProjectConfig(startupCwd, configurationCapture.observe);
 	const warnings = [
 		loaded.warning,
 		loaded.reviewerError,
@@ -141,9 +148,20 @@ export function registerGuard(
 		pi,
 		context,
 		reviewerConfig,
-		bootstrap.autoReview,
+		options.autoReview,
 	);
 	const requiredDecision = new RequiredDecisionController(pi);
+	const protection = new ProtectionSnapshot(
+		pi,
+		context,
+		reviewerConfig,
+		startupCwd,
+		configurationCapture,
+		bootstrap !== undefined || warnings.length > 0,
+		() =>
+			autoReview.hasProtectionRuntimeState() ||
+			requiredDecision.hasProtectionRuntimeState(),
+	);
 	let sessionGeneration = 0;
 	let sessionActive = true;
 
@@ -163,6 +181,7 @@ export function registerGuard(
 	}
 
 	function updateGuardStatus(ctx: ExtensionContext): void {
+		if (!ctx.hasUI) return;
 		const snapshot = buildPolicySnapshot(context);
 		const modelStatus = reviewerStatus(ctx);
 		if (!snapshot.guardEnabled) {
@@ -207,7 +226,10 @@ export function registerGuard(
 				: result.reason,
 			result.ok ? "info" : "warning",
 		);
-		if (result.ok) updateGuardStatus(ctx);
+		if (result.ok) {
+			protection.observe();
+			updateGuardStatus(ctx);
+		}
 	}
 
 	async function runReviewerModelCommand(
@@ -245,6 +267,7 @@ export function registerGuard(
 			return;
 		}
 		const result = handleGuardCommand(action, target, context);
+		protection.observe();
 		const modelStatus = reviewerStatus(ctx);
 		ctx.ui.notify(
 			action === "list" || action === ""
@@ -273,6 +296,7 @@ export function registerGuard(
 		description: "Toggle pi-guard on/off for this session",
 		handler: async (_args, ctx) => {
 			const result = handleGuardCommand("toggle", undefined, context);
+			protection.observe();
 			ctx.ui.notify(result.message, result.type);
 			updateGuardStatus(ctx);
 		},
@@ -281,44 +305,61 @@ export function registerGuard(
 	registerGuardCheck(pi, context);
 	requiredDecision.registerTool();
 	pi.on("session_start", async (_event, ctx) => {
-		resetSessionState();
-		requiredDecision.restore(ctx);
-		updateGuardStatus(ctx);
+		protection.beginSession();
+		try {
+			resetSessionState();
+			requiredDecision.restore(ctx);
+			updateGuardStatus(ctx);
+			protection.started(ctx);
+		} catch (error) {
+			protection.failed();
+			throw error;
+		}
 	});
 	pi.on("session_before_switch", async () => {
+		protection.unsupportedLifecycle();
 		autoReview.abortPending();
 		requiredDecision.abortDialog();
 	});
 	pi.on("session_before_fork", async () => {
+		protection.unsupportedLifecycle();
 		autoReview.abortPending();
 		requiredDecision.abortDialog();
 	});
 	pi.on("session_before_tree", async () => {
+		protection.unsupportedLifecycle();
 		autoReview.abortPending();
 		requiredDecision.abortDialog();
 		sessionGeneration++;
 	});
 	pi.on("session_switch", async (_event, ctx) => {
+		protection.unsupportedLifecycle();
 		resetSessionState();
 		requiredDecision.restore(ctx);
 		updateGuardStatus(ctx);
 	});
 	pi.on("session_fork", async (_event, ctx) => {
+		protection.unsupportedLifecycle();
 		resetSessionState();
 		requiredDecision.restore(ctx);
 		updateGuardStatus(ctx);
 	});
 	pi.on("session_shutdown", async () => {
+		protection.endSession();
 		resetSessionState();
 		sessionActive = false;
 	});
 	pi.on("session_tree", async (_event, ctx) => {
+		protection.unsupportedLifecycle();
 		autoReview.branchChanged();
 		requiredDecision.restore(ctx);
 		sessionGeneration++;
 		updateGuardStatus(ctx);
 	});
-	pi.on("model_select", async (_event, ctx) => updateGuardStatus(ctx));
+	pi.on("model_select", async (_event, ctx) => {
+		protection.observe();
+		updateGuardStatus(ctx);
+	});
 	pi.on("input", async (event, ctx) => {
 		const blocked = requiredDecision.input(event.text, event.source, ctx);
 		if (blocked) return blocked;
@@ -342,41 +383,46 @@ export function registerGuard(
 		autoReview.toolExecutionEnd(event),
 	);
 	pi.on("tool_call", async (event, ctx) => {
-		const decisionResult = requiredDecision.preflight(event, ctx);
-		if (decisionResult || event.toolName === "guard_require_decision")
-			return decisionResult;
-		if (event.toolName === "guard_check") return;
-		if (!sessionActive)
-			return {
-				block: true,
-				reason: "[Blocked by pi-guard: Session is no longer active]",
-			};
-		const generation = sessionGeneration;
-		const sessionId = ctx.sessionManager.getSessionId();
-		const isCurrentSession = () =>
-			sessionActive &&
-			sessionGeneration === generation &&
-			ctx.sessionManager.getSessionId() === sessionId;
-		const snapshot = buildPolicySnapshot(context);
-		const evaluated = evaluateToolCall(
-			snapshot,
-			event.toolName,
-			event.input as ToolCallInput,
-			ctx.cwd,
-		);
-		const result = await autoReview.handle(
-			event,
-			ctx,
-			snapshot,
-			evaluated,
-			isCurrentSession,
-		);
-		return isCurrentSession()
-			? result
-			: {
+		if (event.toolName !== "guard_check") protection.beginOperation();
+		try {
+			const decisionResult = requiredDecision.preflight(event, ctx);
+			if (decisionResult || event.toolName === "guard_require_decision")
+				return decisionResult;
+			if (event.toolName === "guard_check") return;
+			if (!sessionActive)
+				return {
 					block: true,
-					reason: "[Blocked by pi-guard: Session changed during approval]",
+					reason: "[Blocked by pi-guard: Session is no longer active]",
 				};
+			const generation = sessionGeneration;
+			const sessionId = ctx.sessionManager.getSessionId();
+			const isCurrentSession = () =>
+				sessionActive &&
+				sessionGeneration === generation &&
+				ctx.sessionManager.getSessionId() === sessionId;
+			const snapshot = buildPolicySnapshot(context);
+			const evaluated = evaluateToolCall(
+				snapshot,
+				event.toolName,
+				event.input as ToolCallInput,
+				ctx.cwd,
+			);
+			const result = await autoReview.handle(
+				event,
+				ctx,
+				snapshot,
+				evaluated,
+				isCurrentSession,
+			);
+			return isCurrentSession()
+				? result
+				: {
+						block: true,
+						reason: "[Blocked by pi-guard: Session changed during approval]",
+					};
+		} finally {
+			if (event.toolName !== "guard_check") protection.endOperation();
+		}
 	});
 }
 

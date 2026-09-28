@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { minimatch } from "minimatch";
 import type { Action } from "./types.ts";
 

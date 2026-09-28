@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ThinkingLevel } from "@mariozechner/pi-ai";
@@ -41,6 +42,7 @@ function positiveFinite(value: unknown): value is number {
 export function loadReviewerConfigFromSettings(
 	settings: unknown,
 	globalSettingsDirectory: string,
+	observe?: (path: string, contents: string | undefined) => void,
 ): ReviewerConfigResult {
 	if (!record(settings) || !record(settings.guard)) {
 		return { reviewer: { ...DEFAULT_REVIEWER_CONFIG } };
@@ -114,10 +116,9 @@ export function loadReviewerConfigFromSettings(
 	let policy = (raw.policy as string | undefined) ?? "";
 	if (typeof raw.policyFile === "string") {
 		try {
-			policy = fs.readFileSync(
-				path.resolve(globalSettingsDirectory, raw.policyFile),
-				"utf8",
-			);
+			const policyPath = path.resolve(globalSettingsDirectory, raw.policyFile);
+			policy = fs.readFileSync(policyPath, "utf8");
+			observe?.(policyPath, policy);
 		} catch {
 			return fail("policyFile could not be read");
 		}

@@ -1,3 +1,4 @@
+import "./loaded-code.ts";
 import { buildPolicySnapshot } from "./policy.ts";
 import type {
 	GuardContext,
