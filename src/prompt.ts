@@ -39,6 +39,16 @@ export function buildApprovalPrompt(
 	options?: ApprovalPromptOptions,
 	expandedWrappers?: Set<CommandRef>,
 ): string {
+	return `⚠️ Unapproved Commands\n\n${buildApprovalOverview(allCommands, unauthorizedCommands, options, expandedWrappers)}`;
+}
+
+/** Keep the grouped Bash decision summary shared by both approval paths. */
+export function buildApprovalOverview(
+	allCommands: CommandRef[],
+	unauthorizedCommands: CommandRef[],
+	options?: ApprovalPromptOptions,
+	expandedWrappers?: Set<CommandRef>,
+): string {
 	const unauthorizedSet = new Set(unauthorizedCommands);
 	const lines: string[] = [];
 
@@ -59,7 +69,7 @@ export function buildApprovalPrompt(
 		lines.push(command.joiner ? `${line} ${command.joiner}` : line);
 	}
 
-	return ["⚠️ Unapproved Commands", "", ...lines].join("\n");
+	return lines.join("\n");
 }
 
 /** Build prompt for file operations (read/edit/write). */

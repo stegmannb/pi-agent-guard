@@ -13,11 +13,11 @@
 	},
 	{
 		"path": "src/approval-dialog.ts",
-		"sha256": "77acfdcc5a6a5becafbea669756c1d689d234bc398dda9544f0543bb0db37a2d"
+		"sha256": "ce39d3e11c912a0414e8d560a42db6a100dda4a27a8c6505f917b51159bb1362"
 	},
 	{
 		"path": "src/auto-review.ts",
-		"sha256": "bea54296595cea7c475ac9a8a03aee322fffbb48207c2e4ccb9f01557526f79a"
+		"sha256": "4d899ef0a75caee897a9122a599b236a7c056979bd8702e645834e3f6dd41a1b"
 	},
 	{
 		"path": "src/commands.ts",
@@ -65,7 +65,7 @@
 	},
 	{
 		"path": "src/prompt.ts",
-		"sha256": "5ec92cc8097d2de33bf40aae85b556913b1d60ead958f2c1bb12bd4e94c62710"
+		"sha256": "5d632cc4d30afc668619ad08db595637deb9c7f163d1c9151b26857b416a6197"
 	},
 	{
 		"path": "src/protection-snapshot.ts",

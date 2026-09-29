@@ -272,9 +272,16 @@ print/JSON modes require a direct `/guard model` argument and do not open a
 picker. Each review captures the model at its start. A later selection affects
 only later calls.
 
-The approval dialog shows the full command, working directory, recommendation,
-and the reviewer's reason labeled `Reviewer assessment`, including the reviewer's
-decision. If review fails, the dialog labels the failure `Review status`. Its options are flat: `Allow once`,
+The auto-review approval dialog starts with the same grouped Bash summary as the
+pattern approval prompt. `✔` marks allowed parts and `✖` marks parts that need
+approval; pipes, redirects, nested commands, and expanded wrappers stay in order.
+The details below it contain the unchanged original input, working directory,
+policy reason, recommendation, and the reviewer's reason labeled
+`Reviewer assessment`, including the reviewer's decision. Reviewer alternatives
+include their command, reason, changed effect, and Guard preview. PageUp and
+PageDown scroll the details without moving the option selection, and the dialog
+shows the detail position when more is available. If review fails, the dialog
+labels the failure `Review status`. Its options are flat: `Allow once`,
 `Allow for this session`, available project and global rule saves, `Deny`, `Give feedback`, and any
 reviewer alternatives. `Allow for this session` covers only the exact full
 input in the current directory for this Pi session. Project and global saves

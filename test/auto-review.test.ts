@@ -20,6 +20,7 @@ import {
 	type ApprovalClock,
 	ApprovalDialog,
 	type ApprovalOutcome,
+	type ApprovalPresentation,
 	approvalOptions,
 	askApproval,
 } from "../src/approval-dialog.ts";
@@ -220,6 +221,51 @@ test("pattern deny and specific ask never invoke reviewer", async () => {
 	});
 	assert.equal((await specific.call("git push origin main"))?.block, true);
 	assert.equal(specific.reviewCalls(), 0);
+});
+
+test("auto-review ask presents the grouped Bash decision and full reviewer context", async () => {
+	const fake = setup({
+		result: {
+			ok: true,
+			mode: "auto",
+			model: "fake/main",
+			judgment: {
+				decision: "ask",
+				recommendation: "deny",
+				reason: "Inspect the command substitution before allowing it.",
+				alternatives: [
+					{
+						tool: "bash",
+						input: { command: "echo safe" },
+						reason: "Avoid the unknown command.",
+						changedEffect: "Print a fixed value.",
+					},
+				],
+			},
+		},
+		ask: { kind: "choice", choice: "alternative-0" },
+	});
+	const command = "echo $(mysteryctl inspect) && echo done > output.txt";
+	const selected = await fake.call(command);
+	assert.equal(selected?.block, true);
+	assert.match(selected?.reason ?? "", /alternative selected/);
+	assert.match(selected?.reason ?? "", /echo safe.*guard: allow/);
+	assert.equal(fake.context.exactSessionGrants.length, 0);
+	const presentation = fake.presentation() as ApprovalPresentation;
+	assert.equal(presentation.tool, "bash");
+	assert.equal(presentation.command, command);
+	assert.equal(presentation.cwd, "/workspace");
+	assert.match(
+		presentation.overview ?? "",
+		/✔ echo \$\(\.\.\.\) &&\n\n✖ mysteryctl inspect\n\n✔ echo done > output\.txt/,
+	);
+	assert.match(presentation.policyReasons?.join(" ") ?? "", /approval/i);
+	assert.equal(presentation.recommendation, "deny");
+	assert.match(presentation.reason, /command substitution/);
+	assert.match(
+		presentation.alternatives?.[0] ?? "",
+		/echo safe.*Avoid the unknown command.*Print a fixed value/,
+	);
 });
 
 test("auto deny explains, prevents unchanged repeat, and permits a one-time exact override", async () => {
@@ -819,11 +865,17 @@ test("RPC uses a flat standard selector without an autonomous approval timeout",
 		},
 	} as unknown as ExtensionContext;
 	const result = await askApproval(ctx, {
+		tool: "bash",
 		command: "git push origin main",
+		overview: "✔ git status &&\n✖ git push origin main",
 		cwd: "/workspace",
+		policyReasons: ["Fallback rule requires approval."],
 		recommendation: "deny",
 		reason: "Check destination",
 		reasonLabel: "Reviewer assessment",
+		alternatives: [
+			"1. git status — Read-only; changed effect: no push; guard: allow",
+		],
 		options: approvalOptions(true, true, [
 			{ input: { command: "git status" } },
 		]),
@@ -832,6 +884,10 @@ test("RPC uses a flat standard selector without an autonomous approval timeout",
 	assert.deepEqual(result, { kind: "choice", choice: "deny" });
 	assert.match(title, /Timeout paused: input activity unavailable/);
 	assert.match(title, /Reviewer assessment: Check destination/);
+	assert.match(title, /✔ git status &&\n✖ git push origin main/);
+	assert.match(title, /Original input:\ngit push origin main/);
+	assert.match(title, /Fallback rule requires approval/);
+	assert.match(title, /changed effect: no push/);
 	assert.equal(options[0], "Deny");
 	assert.ok(
 		options.some((option) =>
@@ -1001,7 +1057,7 @@ test("narrow, low terminal keeps the flat options visible and scrolls long detai
 				{ input: { command: "git diff" } },
 				{ input: { command: "git log -1" } },
 			]),
-			timeoutMs: null,
+			timeoutMs: 120_000,
 		},
 		() => {},
 	);
@@ -1009,6 +1065,7 @@ test("narrow, low terminal keeps the flat options visible and scrolls long detai
 	assert.ok(first.length <= 12);
 	assert.ok(first.every((line) => visibleWidth(line) <= 40));
 	assert.match(first.join("\n"), /Deny/);
+	assert.match(first.join("\n"), /Auto-deny in 120 s/);
 	assert.match(first.join("\n"), /PgUp\/PgDn/);
 	for (let index = 0; index < 3; index++) dialog.handleInput("\x1b[A");
 	const sessionScope = dialog.render(40);
@@ -1017,12 +1074,93 @@ test("narrow, low terminal keeps the flat options visible and scrolls long detai
 		sessionScope.join("\n"),
 		/Scope: exact command \+ cwd, this session/,
 	);
-	dialog.handleInput("\x1b[6~");
-	assert.match(dialog.render(40).join("\n"), /exact repository/);
-	dialog.handleInput("\x1b[6~");
-	assert.match(dialog.render(40).join("\n"), /&& echo a very long command/);
-	assert.ok(dialog.render(40).every((line) => visibleWidth(line) <= 40));
+	dialog.handleInput("\x1b[B");
+	assert.match(
+		dialog.render(40).join("\n"),
+		/Scope: command-name rule in project/,
+	);
+	dialog.handleInput("\x1b[B");
+	assert.match(
+		dialog.render(40).join("\n"),
+		/Scope: command-name rule globally/,
+	);
+	const seen: string[] = [];
+	for (let page = 0; page < 30; page++) {
+		const lines = dialog.render(40);
+		assert.ok(lines.length <= 12);
+		assert.ok(lines.every((line) => visibleWidth(line) <= 40));
+		seen.push(lines.join("\n"));
+		dialog.handleInput("\x1b[6~");
+	}
+	assert.match(seen.join("\n"), /exact repository/);
+	assert.match(seen.join("\n"), /&& echo a very long command/);
+	assert.match(dialog.render(40).join("\n"), /Timeout paused/);
 	dialog.dispose();
+});
+
+test("80 x 24 keeps the grouped action, selected option and countdown visible", () => {
+	const tui = { terminal: { rows: 24 }, requestRender() {} };
+	const dialog = new ApprovalDialog(
+		tui as never,
+		{
+			tool: "bash",
+			command: "echo ok | mysteryctl inspect > out",
+			overview: "✔ echo ok |\n✖ mysteryctl inspect > out",
+			cwd: "/workspace",
+			policyReasons: ["Fallback rule requires approval."],
+			recommendation: "allow",
+			reason: "Inspection appears safe.",
+			options: approvalOptions(true, true, [
+				{ input: { command: "echo safe" } },
+			]),
+			timeoutMs: 120_000,
+		},
+		() => {},
+	);
+	const lines = dialog.render(80);
+	assert.ok(lines.length <= 24);
+	assert.ok(lines.every((line) => visibleWidth(line) <= 80));
+	assert.match(lines[1] ?? "", /✔ echo ok \|/);
+	assert.match(lines[2] ?? "", /✖ mysteryctl inspect > out/);
+	assert.match(lines.join("\n"), /→ Allow once/);
+	assert.match(lines.join("\n"), /Auto-deny in 120 s/);
+	dialog.dispose();
+});
+
+test("narrow terminal cancel and alternative selection never imply approval", () => {
+	const tui = { terminal: { rows: 12 }, requestRender() {} };
+	const presentation: ApprovalPresentation = {
+		command: "mysteryctl publish",
+		cwd: "/workspace",
+		recommendation: "allow",
+		reason: "Ask the user.",
+		options: approvalOptions(true, true, [
+			{ input: { command: "mysteryctl inspect" } },
+		]),
+		timeoutMs: null,
+	};
+	let result: ApprovalOutcome | undefined;
+	const canceled = new ApprovalDialog(tui as never, presentation, (value) => {
+		result = value;
+	});
+	assert.match(canceled.render(40).join("\n"), /→ Allow once/);
+	canceled.handleInput("\x1b");
+	assert.deepEqual(result, { kind: "cancel" });
+	canceled.dispose();
+
+	result = undefined;
+	const alternative = new ApprovalDialog(
+		tui as never,
+		presentation,
+		(value) => {
+			result = value;
+		},
+	);
+	for (let index = 0; index < 6; index++) alternative.handleInput("\x1b[B");
+	assert.match(alternative.render(40).join("\n"), /→ Return alternative 1/);
+	alternative.handleInput("\r");
+	assert.deepEqual(result, { kind: "choice", choice: "alternative-0" });
+	alternative.dispose();
 });
 
 test("timeout wins over a late keypress exactly once", () => {

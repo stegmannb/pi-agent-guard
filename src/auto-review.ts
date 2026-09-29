@@ -23,6 +23,7 @@ import {
 import { type EvaluatedToolCall, evaluateToolCall } from "./evaluator.ts";
 import { enforceToolEvaluation } from "./handlers.ts";
 import { buildPolicySnapshot } from "./policy.ts";
+import { approvalReasons, buildApprovalOverview } from "./prompt.ts";
 import { getCommandName } from "./resolve.ts";
 import {
 	createReviewerRequest,
@@ -396,13 +397,26 @@ export class AutoReviewController {
 			result.ok ? result.judgment.alternatives : [],
 		);
 		const presentation: ApprovalPresentation = {
+			tool: run.evaluated.result.tool,
 			command: String(run.evaluated.result.input.command ?? ""),
+			...(run.evaluated.bash
+				? {
+						overview: buildApprovalOverview(
+							run.evaluated.bash.allCommands,
+							run.evaluated.bash.askCommands,
+							undefined,
+							run.evaluated.bash.expandedWrappers,
+						),
+					}
+				: {}),
 			cwd: run.ctx.cwd,
+			policyReasons: approvalReasons(run.evaluated.result),
 			recommendation: result.ok ? result.judgment.recommendation : null,
 			reason: reason,
 			reasonLabel: result.ok
 				? `Reviewer assessment (${result.judgment.decision})`
 				: `Review status (${result.error})`,
+			alternatives,
 			options,
 			timeoutMs: this.config.approvalTimeoutMs,
 		};

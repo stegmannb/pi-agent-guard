@@ -33,17 +33,38 @@ export interface ApprovalOption {
 }
 
 export interface ApprovalPresentation {
+	tool?: string;
 	command: string;
+	overview?: string;
 	cwd: string;
+	policyReasons?: string[];
 	recommendation: "allow" | "deny" | null;
 	reason: string;
 	reasonLabel?: string;
+	alternatives?: string[];
 	options: ApprovalOption[];
 	timeoutMs: number | null;
 }
 
 function reasonLine(presentation: ApprovalPresentation): string {
 	return `${presentation.reasonLabel ?? "Reason"}: ${presentation.reason}`;
+}
+
+function approvalDetails(presentation: ApprovalPresentation): string {
+	return [
+		...(presentation.overview ? [presentation.overview, ""] : []),
+		"Original input:",
+		presentation.command,
+		`Cwd: ${presentation.cwd}`,
+		...(presentation.policyReasons?.length
+			? ["Why approval is required:", ...presentation.policyReasons]
+			: []),
+		`Recommendation: ${presentation.recommendation ?? "Ask"}`,
+		reasonLine(presentation),
+		...(presentation.alternatives?.length
+			? ["Reviewer alternatives (not executed):", ...presentation.alternatives]
+			: []),
+	].join("\n");
 }
 
 export interface ApprovalClock {
@@ -125,6 +146,7 @@ export class ApprovalDialog {
 	private finished = false;
 	private editingFeedback = false;
 	private scrollOffset = 0;
+	private detailPageSize = 1;
 	private readonly onAbort = () => this.finish({ kind: "cancel" });
 
 	constructor(
@@ -250,12 +272,12 @@ export class ApprovalDialog {
 			return;
 		}
 		if (matchesKey(data, "pageDown")) {
-			this.scrollOffset += 5;
+			this.scrollOffset += this.detailPageSize;
 			this.tui.requestRender();
 			return;
 		}
 		if (matchesKey(data, "pageUp")) {
-			this.scrollOffset = Math.max(0, this.scrollOffset - 5);
+			this.scrollOffset = Math.max(0, this.scrollOffset - this.detailPageSize);
 			this.tui.requestRender();
 			return;
 		}
@@ -295,9 +317,7 @@ export class ApprovalDialog {
 
 	render(width: number): string[] {
 		const p = this.presentation;
-		this.header.setText(
-			`Cwd: ${p.cwd}\nRecommendation: ${p.recommendation ?? "Ask"}\n${reasonLine(p)}\nCommand:\n${p.command}`,
-		);
+		this.header.setText(approvalDetails(p));
 		const details = this.header.render(width);
 		const options = this.editingFeedback
 			? ["Feedback to agent:", ...this.input.render(width)]
@@ -307,13 +327,14 @@ export class ApprovalDialog {
 			1,
 			this.tui.terminal.rows - options.length - 5 - (compactScope ? 1 : 0),
 		);
+		this.detailPageSize = detailHeight;
 		const start = Math.min(
 			this.scrollOffset,
 			Math.max(0, details.length - detailHeight),
 		);
 		const visible = details.slice(start, start + detailHeight);
 		return [
-			"Guard approval required",
+			`Guard approval required · ${p.tool ?? "bash"}`,
 			...visible,
 			...(details.length > detailHeight
 				? [
@@ -371,7 +392,7 @@ export async function askApproval(
 	const labels = ordered.map(rpcOptionLabel);
 	try {
 		const picked = await ctx.ui.select(
-			`Guard approval required\nCwd: ${presentation.cwd}\nCommand: ${presentation.command}\nRecommendation: ${presentation.recommendation ?? "Ask"}\n${reasonLine(presentation)}\nTimeout paused: input activity unavailable`,
+			`Guard approval required · ${presentation.tool ?? "bash"}\n${approvalDetails(presentation)}\nTimeout paused: input activity unavailable`,
 			labels,
 			signal ? { signal } : {},
 		);
