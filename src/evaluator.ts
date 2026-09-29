@@ -49,6 +49,43 @@ interface EvaluatedBashCommand {
 	result: BashCommandEvaluation;
 }
 
+function commandEvidence(
+	command: CommandRef,
+	indexes: Map<CommandRef, number>,
+): Pick<
+	BashCommandEvaluation,
+	"command" | "fullCommand" | "sourceText" | "group" | "joiner" | "context"
+> {
+	const hasHeredoc = command.node.redirects.some(
+		({ operator, content }) =>
+			(operator === "<<" || operator === "<<-") && content != null,
+	);
+	const sourceText =
+		command.syntheticSource || hasHeredoc
+			? ""
+			: command.source.slice(command.node.pos, command.node.end);
+	return {
+		command: formatCommand(command),
+		fullCommand:
+			sourceText ||
+			formatCommand(command, {
+				maxLength: Number.MAX_SAFE_INTEGER,
+				argMaxLength: Number.MAX_SAFE_INTEGER,
+			}),
+		sourceText,
+		group: command.group,
+		...(command.joiner ? { joiner: command.joiner } : {}),
+		context: (command.context ?? []).map(({ kind, parent, scopeId }) => {
+			const parentIndex = parent ? indexes.get(parent) : undefined;
+			return {
+				kind,
+				...(parentIndex === undefined ? {} : { parentIndex }),
+				...(scopeId === undefined ? {} : { scopeId }),
+			};
+		}),
+	};
+}
+
 function disposition(
 	snapshot: PolicySnapshot,
 	action: Action,
@@ -103,6 +140,7 @@ function evaluateBashCommand(
 	tool: string,
 	command: CommandRef,
 	rules: Action | Record<string, Action>,
+	indexes: Map<CommandRef, number>,
 ): EvaluatedBashCommand {
 	const bareAssignment = isBareAssignment(command);
 	const name = getCommandName(command);
@@ -128,7 +166,7 @@ function evaluateBashCommand(
 	return {
 		reference: command,
 		result: {
-			command: formatCommand(command),
+			...commandEvidence(command, indexes),
 			name,
 			args,
 			action,
@@ -214,8 +252,11 @@ function evaluateBash(
 		expandedWrappers,
 		parserErrors,
 	} = expandWrapperCommands(extractAllCommandsFromAST(parsed.ast, rawCommand));
+	const indexes = new Map(
+		allCommands.map((command, index) => [command, index]),
+	);
 	const evaluatedCommands = allCommands.map((command) =>
-		evaluateBashCommand(snapshot, tool, command, rules),
+		evaluateBashCommand(snapshot, tool, command, rules, indexes),
 	);
 	const askCommands = evaluatedCommands
 		.filter(({ result }) => result.action === "ask")

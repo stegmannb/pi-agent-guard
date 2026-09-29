@@ -21,7 +21,7 @@ import {
 	loadReviewerConfigFromSettings,
 	type ReviewerConfig,
 } from "../src/reviewer-config.ts";
-import type { GuardContext } from "../src/types.ts";
+import type { BashCommandEvaluation, GuardContext } from "../src/types.ts";
 
 const config = {
 	mode: "auto" as const,
@@ -75,6 +75,31 @@ function fixture() {
 		entries as ReturnType<ExtensionContext["sessionManager"]["getBranch"]>,
 		"request-1",
 	);
+}
+
+function compoundSnapshot() {
+	const rules = {
+		bash: {
+			"*": "ask" as const,
+			echo: "allow" as const,
+			cat: "allow" as const,
+			sudo: "allow" as const,
+			bash: "allow" as const,
+		},
+	};
+	const guard: GuardContext = {
+		config: { enabled: true, matchers: DEFAULT_CONFIG.matchers, rules },
+		staticPolicy: {
+			userRules: rules,
+			projectRules: {},
+			envRules: undefined,
+			projectConfigPresent: false,
+		},
+		activeProfile: undefined,
+		sessionRules: {},
+		exactSessionGrants: [],
+	};
+	return buildPolicySnapshot(guard);
 }
 
 const model = {
@@ -481,6 +506,210 @@ test("one tool-free call passes full policy, role-separated evidence, headers an
 	const result = await reviewGuardRequest(request, config, deps);
 	assert.equal(calls, 1);
 	assert.equal(result.ok && result.judgment.recommendation, "deny");
+});
+
+test("sent reviewer request retains every evaluated Bash part and its shell relationships", async () => {
+	const snapshot = compoundSnapshot();
+	const command = 'echo "$(date)" | cat && sudo git push > out 2>&1';
+	const input = { command, timeout: 123, maxOutputChars: 4096 };
+	const evaluation = evaluateToolCall(snapshot, "bash", input, "/repo").result;
+	assert.equal(evaluation.reviewEligible, true);
+	const entries = [
+		{
+			type: "message",
+			id: "user",
+			parentId: null,
+			timestamp: "now",
+			message: { role: "user", content: "Inspect the repo", timestamp: 1 },
+		},
+		{
+			type: "message",
+			id: "tool",
+			parentId: "user",
+			timestamp: "now",
+			message: {
+				role: "toolResult",
+				toolName: "read",
+				content: [{ type: "text", text: "project content" }],
+				timestamp: 2,
+			},
+		},
+	];
+	const request = createReviewerRequest(
+		evaluation,
+		snapshot,
+		entries as ReturnType<ExtensionContext["sessionManager"]["getBranch"]>,
+	);
+	let sent = false;
+	const result = await reviewGuardRequest(
+		request,
+		config,
+		dependencies(judgment("ask"), {
+			spy: (context) => {
+				sent = true;
+				const payload = context as {
+					systemPrompt: string;
+					messages: { content: string }[];
+				};
+				const body = JSON.parse(payload.messages[0]?.content ?? "") as {
+					proposedCall: { input: typeof input; cwd: string };
+					evaluation: typeof evaluation;
+					guardRules: typeof snapshot;
+					operatorPolicy: string;
+					userTask: string;
+					conversation: { role: string; source: string }[];
+				};
+				assert.deepEqual(body.proposedCall.input, input);
+				assert.equal(body.proposedCall.input.command, command);
+				assert.equal(body.proposedCall.cwd, "/repo");
+				assert.deepEqual(body.evaluation.commands, evaluation.commands);
+				assert.deepEqual(
+					body.evaluation.commands?.map(({ name }) => name),
+					["echo", "date", "cat", "sudo", "git"],
+				);
+				assert.equal(body.evaluation.commands?.[0]?.joiner, "|");
+				assert.equal(body.evaluation.commands?.[2]?.joiner, "&&");
+				assert.deepEqual(body.evaluation.commands?.[1]?.context, [
+					{ kind: "command-substitution", parentIndex: 0 },
+				]);
+				assert.deepEqual(body.evaluation.commands?.[4]?.context, [
+					{ kind: "wrapper", parentIndex: 3 },
+				]);
+				assert.equal(
+					body.evaluation.commands?.[3]?.sourceText,
+					"sudo git push > out 2>&1",
+				);
+				assert.equal(body.evaluation.commands?.[4]?.action, "ask");
+				assert.equal(body.evaluation.commands?.[4]?.winningRule?.pattern, "*");
+				assert.deepEqual(body.guardRules, snapshot);
+				assert.equal(body.operatorPolicy, config.policy);
+				assert.equal(body.userTask, "Inspect the repo");
+				assert.deepEqual(
+					body.conversation.map(({ role, source }) => ({ role, source })),
+					[
+						{ role: "user", source: "session" },
+						{ role: "tool", source: "read" },
+					],
+				);
+				assert.match(payload.systemPrompt, /not independent top-level calls/);
+			},
+		}),
+	);
+	assert.equal(result.ok, true);
+	assert.equal(sent, true);
+});
+
+test("sent Bash evidence retains embedded scripts, heredocs, and background and stderr operators", async () => {
+	const snapshot = compoundSnapshot();
+	const cases = [
+		{
+			command: "bash -c 'echo $(unknown)'",
+			check: (commands: BashCommandEvaluation[]) => {
+				assert.equal(commands[1]?.fullCommand, "echo $(unknown)");
+				assert.deepEqual(commands[1]?.context, [
+					{ kind: "wrapper", parentIndex: 0 },
+				]);
+			},
+		},
+		{
+			command: "cat <<EOF\n$(unknown)\nEOF",
+			check: (commands: BashCommandEvaluation[]) => {
+				assert.match(commands[0]?.fullCommand ?? "", /\$\(unknown\)/);
+				assert.match(commands[0]?.fullCommand ?? "", /EOF$/);
+			},
+		},
+		{
+			command: "echo safe & unknown",
+			check: (commands: BashCommandEvaluation[]) => {
+				assert.equal(commands[0]?.joiner, "&");
+			},
+		},
+		{
+			command: "echo safe |& unknown",
+			check: (commands: BashCommandEvaluation[]) => {
+				assert.equal(commands[0]?.joiner, "|&");
+			},
+		},
+	];
+	for (const { command, check } of cases) {
+		const input = { command };
+		const evaluation = evaluateToolCall(
+			snapshot,
+			"bash",
+			input,
+			"/repo",
+		).result;
+		assert.equal(evaluation.reviewEligible, true);
+		let sent = false;
+		const result = await reviewGuardRequest(
+			{ ...fixture(), policySnapshot: snapshot, input, evaluation },
+			config,
+			dependencies(judgment("ask"), {
+				spy: (context) => {
+					sent = true;
+					const payload = context as { messages: { content: string }[] };
+					const body = JSON.parse(payload.messages[0]?.content ?? "") as {
+						evaluation: typeof evaluation;
+					};
+					assert.deepEqual(body.evaluation.commands, evaluation.commands);
+					assert.ok(body.evaluation.commands);
+					check(body.evaluation.commands);
+				},
+			}),
+		);
+		assert.equal(result.ok, true);
+		assert.equal(sent, true);
+	}
+});
+
+test("nested subshell evidence and mandatory context failures stay conservative", async () => {
+	const base = fixture();
+	const command = "(echo ok; git push) && curl example.org";
+	const input = { command };
+	const evaluation = evaluateToolCall(
+		base.policySnapshot,
+		"bash",
+		input,
+		"/repo",
+	).result;
+	assert.equal(evaluation.reviewEligible, true);
+	assert.deepEqual(
+		evaluation.commands?.slice(0, 2).map(({ context }) => context),
+		[[{ kind: "subshell", scopeId: 0 }], [{ kind: "subshell", scopeId: 0 }]],
+	);
+	assert.equal(evaluation.commands?.[0]?.joiner, ";");
+	const request = { ...base, input, evaluation };
+	let called = false;
+	const oversized = structuredClone(request);
+	const first = oversized.evaluation.commands?.[0];
+	assert.ok(first);
+	first.fullCommand = "x".repeat(200_000);
+	const overflow = await reviewGuardRequest(
+		oversized,
+		config,
+		dependencies(judgment("allow"), {
+			spy: () => {
+				called = true;
+			},
+		}),
+	);
+	assert.equal(overflow.ok, false);
+	if (!overflow.ok) assert.equal(overflow.error, "context");
+	assert.equal(called, false);
+	const incomplete = structuredClone(request);
+	delete incomplete.evaluation.commands;
+	const missing = await reviewGuardRequest(
+		incomplete,
+		config,
+		dependencies(judgment("allow"), {
+			spy: () => {
+				called = true;
+			},
+		}),
+	);
+	assert.equal(missing.ok, false);
+	if (!missing.ok) assert.equal(missing.error, "context");
+	assert.equal(called, false);
 });
 
 test("command injection stays quoted evidence and cannot replace the operator policy", async () => {

@@ -137,6 +137,16 @@ export function expandWrapperCommands(commands: CommandRef[]): ExpansionResult {
 	);
 	const ctx: ExpansionContext = {
 		nextGroupId: maxGroupId + 1,
+		nextScopeId:
+			commands.reduce(
+				(max, command) =>
+					(command.context ?? []).reduce(
+						(scopeMax, { scopeId }) => Math.max(scopeMax, scopeId ?? -1),
+						max,
+					),
+				-1,
+			) + 1,
+		context: [],
 		parserErrors: [],
 	};
 	const result = doExpand(commands, expandedWrappers, ctx);
@@ -158,6 +168,13 @@ function doExpand(
 		const subCommands = extractSubCommands(cmd, spec, ctx);
 		if (subCommands.length > 0) {
 			expandedWrappers.add(cmd);
+			for (const child of subCommands) {
+				child.context = [
+					...(cmd.context ?? []),
+					{ kind: "wrapper", parent: cmd },
+					...(child.context ?? []),
+				];
+			}
 			result.push(...doExpand(subCommands, expandedWrappers, ctx));
 		}
 	}
@@ -403,6 +420,9 @@ function parseCommandTokens(
 	const placeholder = "__pi_guard_embedded_executable__";
 	const serialized = [placeholder, ...args].map(shellQuoteToken).join(" ");
 	const commands = parseSubCommandString(serialized, ctx);
+	for (const parsed of commands) {
+		if (parsed.source === serialized) parsed.syntheticSource = true;
+	}
 	const command = commands[0];
 	if (!command?.node.name) return commands;
 	command.node.name = {

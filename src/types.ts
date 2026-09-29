@@ -5,12 +5,28 @@ import type { Command } from "unbash";
 export interface CommandRef {
 	node: Command;
 	source: string;
+	/** True only for argv wrappers reconstructed with a parser placeholder. */
+	syntheticSource?: boolean;
+	/** Parser ancestry. Parent references are resolved to command indexes for output. */
+	context?: CommandContext[];
 	/** Group ID: commands in the same group are connected by operators
 	 * and displayed together. Different groups are separated by blank lines. */
 	group: number;
-	/** The operator connecting this command to the next ("|", "&&", "||", or ";").
-	 * Undefined for the last command in a group. */
-	joiner?: "|" | "&&" | "||" | ";";
+	/** Following shell operator; "&" can also terminate a background statement. */
+	joiner?: "|" | "|&" | "&&" | "||" | ";" | "&";
+}
+
+export interface CommandContext {
+	kind:
+		| "subshell"
+		| "brace-group"
+		| "command-substitution"
+		| "process-substitution"
+		| "arithmetic-command-substitution"
+		| "wrapper";
+	parent?: CommandRef;
+	/** Distinguishes separate subshells and brace groups. */
+	scopeId?: number;
 }
 
 /** Matcher types define how to extract and match input from a tool call. */
@@ -144,6 +160,17 @@ export interface WinningRule extends RuleOrigin {
 
 export interface BashCommandEvaluation {
 	command: string;
+	/** Complete, non-UI rendering of this parsed command. */
+	fullCommand: string;
+	/** Source fragment when the parser retained one; wrapper commands are derived. */
+	sourceText: string;
+	group: number;
+	joiner?: CommandRef["joiner"];
+	context: {
+		kind: CommandContext["kind"];
+		parentIndex?: number;
+		scopeId?: number;
+	}[];
 	name: string;
 	args: string[];
 	action: Action;

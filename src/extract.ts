@@ -14,18 +14,34 @@ import type {
 	WordPart,
 } from "unbash";
 import { parse as parseBash } from "unbash";
-import type { CommandRef } from "./types.ts";
+import type { CommandContext, CommandRef } from "./types.ts";
 
 export type { CommandRef };
 
 /** Mutable context for tracking group IDs during extraction. */
 export interface ExtractCtx {
 	nextGroupId: number;
+	nextScopeId: number;
+	context: CommandContext[];
+	currentCommand?: CommandRef;
 }
 
 /** Create a new extraction context starting at groupId 0. */
 export function createExtractCtx(): ExtractCtx {
-	return { nextGroupId: 0 };
+	return { nextGroupId: 0, nextScopeId: 0, context: [] };
+}
+
+function withinContext(
+	ctx: ExtractCtx,
+	entry: CommandContext,
+	visit: () => void,
+) {
+	ctx.context.push(entry);
+	try {
+		visit();
+	} finally {
+		ctx.context.pop();
+	}
 }
 
 /** Allocate the next group ID from the context. */
@@ -103,29 +119,56 @@ function collectCompoundOrChain(
 ) {
 	switch (node.type) {
 		case "Script":
-		case "CompoundList": {
-			for (const [i, child] of node.commands.entries()) {
-				const startIdx = commands.length;
-				collectNode(child, source, commands, groupId, ctx);
-				const joinerTarget = findLastInGroup(commands, groupId, startIdx);
-				if (i < node.commands.length - 1 && joinerTarget) {
-					joinerTarget.joiner = ";";
-				}
-			}
+		case "CompoundList":
+			collectSequential(node.commands, source, commands, groupId, ctx);
 			return;
-		}
 		case "Pipeline":
-		case "AndOr": {
-			for (const [i, child] of node.commands.entries()) {
-				const startIdx = commands.length;
-				collectNode(child, source, commands, groupId, ctx);
-				const joinerTarget = findLastInGroup(commands, groupId, startIdx);
-				const op = node.operators[i];
-				if (op !== undefined && joinerTarget) {
-					joinerTarget.joiner = op as "|" | "&&" | "||";
-				}
-			}
+		case "AndOr":
+			collectChained(
+				node.commands,
+				node.operators,
+				source,
+				commands,
+				groupId,
+				ctx,
+			);
 			return;
+	}
+}
+
+function collectSequential(
+	children: Node[],
+	source: string,
+	commands: CommandRef[],
+	groupId: number,
+	ctx: ExtractCtx,
+) {
+	for (const [index, child] of children.entries()) {
+		const startIdx = commands.length;
+		collectNode(child, source, commands, groupId, ctx);
+		const joinerTarget = findLastInGroup(commands, groupId, startIdx);
+		if (!joinerTarget) continue;
+		if (child.type === "Statement" && child.background)
+			joinerTarget.joiner = "&";
+		else if (index < children.length - 1) joinerTarget.joiner = ";";
+	}
+}
+
+function collectChained(
+	children: Node[],
+	operators: string[],
+	source: string,
+	commands: CommandRef[],
+	groupId: number,
+	ctx: ExtractCtx,
+) {
+	for (const [index, child] of children.entries()) {
+		const startIdx = commands.length;
+		collectNode(child, source, commands, groupId, ctx);
+		const joinerTarget = findLastInGroup(commands, groupId, startIdx);
+		const op = operators[index];
+		if (op !== undefined && joinerTarget) {
+			joinerTarget.joiner = op as "|" | "|&" | "&&" | "||";
 		}
 	}
 }
@@ -198,7 +241,14 @@ function collectRemaining(
 
 		case "Subshell":
 		case "BraceGroup":
-			collectNode(node.body, source, commands, groupId, ctx);
+			withinContext(
+				ctx,
+				{
+					kind: node.type === "Subshell" ? "subshell" : "brace-group",
+					scopeId: ctx.nextScopeId++,
+				},
+				() => collectNode(node.body, source, commands, groupId, ctx),
+			);
 			return;
 
 		case "Function":
@@ -253,8 +303,16 @@ function collectCommand(
 	groupId: number,
 	ctx: ExtractCtx,
 ) {
+	const previousCommand = ctx.currentCommand;
 	if (node.name || node.prefix.length > 0) {
-		commands.push({ node, source, group: groupId });
+		const command: CommandRef = {
+			node,
+			source,
+			group: groupId,
+			...(ctx.context.length > 0 ? { context: [...ctx.context] } : {}),
+		};
+		commands.push(command);
+		ctx.currentCommand = command;
 	}
 
 	for (const prefix of node.prefix) {
@@ -268,6 +326,8 @@ function collectCommand(
 	for (const redirect of node.redirects) {
 		collectRedirect(redirect, source, commands, groupId, ctx);
 	}
+	if (previousCommand) ctx.currentCommand = previousCommand;
+	else delete ctx.currentCommand;
 }
 
 function collectAssignment(
@@ -337,12 +397,23 @@ function collectWordPart(
 			// Commands inside expansions get their own group
 			const expansionGroup = allocGroupId(ctx);
 			if (part.script) {
-				collectNode(
-					part.script,
-					expansionSource(part, source),
-					commands,
-					expansionGroup,
+				withinContext(
 					ctx,
+					{
+						kind:
+							part.type === "CommandExpansion"
+								? "command-substitution"
+								: "process-substitution",
+						...(ctx.currentCommand ? { parent: ctx.currentCommand } : {}),
+					},
+					() =>
+						collectNode(
+							part.script,
+							expansionSource(part, source),
+							commands,
+							expansionGroup,
+							ctx,
+						),
 				);
 			}
 			return;
@@ -495,24 +566,40 @@ function collectArithmeticExpression(
 				ctx,
 			);
 			return;
-		case "ArithmeticCommandExpansion": {
-			// Commands inside arithmetic expansions get their own group
-			const expansionGroup = allocGroupId(ctx);
-			if (expr.script) {
-				// Extract inner source from text like "$(cmd)" -> "cmd"
-				const innerSource =
-					expr.text.startsWith("$(") && expr.text.endsWith(")")
-						? expr.text.slice(2, -1)
-						: expr.text;
-				collectNode(expr.script, innerSource, commands, expansionGroup, ctx);
-			} else if (expr.inner) {
-				// Parse the inner text and collect commands (for double-quoted context)
-				const innerAst = parseBash(expr.inner);
-				collectNode(innerAst, expr.inner, commands, expansionGroup, ctx);
-			}
+		case "ArithmeticCommandExpansion":
+			collectArithmeticCommandExpansion(expr, commands, ctx);
 			return;
-		}
 		case "ArithmeticWord":
 			return;
 	}
+}
+
+function collectArithmeticCommandExpansion(
+	expr: Extract<ArithmeticExpression, { type: "ArithmeticCommandExpansion" }>,
+	commands: CommandRef[],
+	ctx: ExtractCtx,
+) {
+	const expansionGroup = allocGroupId(ctx);
+	const source =
+		expr.text.startsWith("$(") && expr.text.endsWith(")")
+			? expr.text.slice(2, -1)
+			: expr.text;
+	const script =
+		expr.script ?? (expr.inner ? parseBash(expr.inner) : undefined);
+	if (!script) return;
+	withinContext(
+		ctx,
+		{
+			kind: "arithmetic-command-substitution",
+			...(ctx.currentCommand ? { parent: ctx.currentCommand } : {}),
+		},
+		() =>
+			collectNode(
+				script,
+				expr.script ? source : (expr.inner ?? ""),
+				commands,
+				expansionGroup,
+				ctx,
+			),
+	);
 }
