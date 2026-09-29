@@ -19,21 +19,38 @@ type ToolCallHandler = (
 function harness(
 	hasUI = true,
 	rules: Rules = { bash: { "*": "ask", echo: "allow", rm: "deny" } },
+	enabled = true,
 ) {
 	let toolCallHandler: ToolCallHandler | undefined;
 	let guardCheck: ToolDefinition | undefined;
 	const hooks = new Map<string, ToolCallHandler>();
+	const tools: string[] = [];
+	const commands = new Map<
+		string,
+		(args: string, ctx: ExtensionContext) => Promise<void>
+	>();
 	let selectCalls = 0;
+	let entries = 0;
 	const pi = {
 		on(event: string, handler: ToolCallHandler) {
 			hooks.set(event, handler);
 			if (event === "tool_call") toolCallHandler = handler;
 		},
 		registerTool(tool: ToolDefinition) {
+			tools.push(tool.name);
 			if (tool.name === "guard_check") guardCheck = tool;
 		},
-		registerCommand() {},
-		appendEntry() {},
+		registerCommand(
+			name: string,
+			command: {
+				handler: (args: string, ctx: ExtensionContext) => Promise<void>;
+			},
+		) {
+			commands.set(name, command.handler);
+		},
+		appendEntry() {
+			entries++;
+		},
 		events: { emit() {} },
 	} as unknown as ExtensionAPI;
 	const ctx = {
@@ -54,7 +71,7 @@ function harness(
 	registerGuard(pi, {
 		loaded: {
 			config: {
-				enabled: true,
+				enabled,
 				matchers: DEFAULT_CONFIG.matchers,
 				rules,
 			},
@@ -78,8 +95,143 @@ function harness(
 			return hook;
 		},
 		selectCalls: () => selectCalls,
+		entries: () => entries,
+		tools,
+		commands,
 	};
 }
+
+test("dry-run evaluates complete Bash input without UI, execution, or session writes", async () => {
+	const cases = [
+		{
+			command: "echo ok | curl example.com > out",
+			action: "ask",
+			eligible: true,
+			rule: "*",
+		},
+		{ command: "echo ok", action: "allow", eligible: false, rule: "echo" },
+		{
+			command: "rm -rf build | cat > out",
+			action: "deny",
+			eligible: false,
+			rule: "rm",
+		},
+		{
+			command: 'echo "$(rm -rf build)"',
+			action: "deny",
+			eligible: false,
+			rule: "rm",
+		},
+	] as const;
+	for (const hasUI of [true, false]) {
+		const fake = harness(hasUI);
+		assert.deepEqual(fake.tools, ["guard_check"]);
+		for (const item of cases) {
+			const input = { command: item.command };
+			const entriesBefore = fake.entries();
+			const preview = await fake
+				.getGuardCheck()
+				.execute(
+					"preview",
+					{ mode: "check", tool: "bash", input },
+					undefined,
+					undefined,
+					fake.ctx,
+				);
+			const result = preview.details as {
+				input: unknown;
+				cwd: string;
+				patternAction: string;
+				disposition: string;
+				reviewEligible: boolean;
+				winningRule?: { pattern: string; layer: string };
+				commands?: Array<{ action: string }>;
+			};
+			assert.deepEqual(result.input, input);
+			assert.equal(result.cwd, "/workspace");
+			assert.equal(result.patternAction, item.action);
+			assert.equal(result.disposition, item.action);
+			assert.equal(result.reviewEligible, item.eligible);
+			assert.equal(result.winningRule?.pattern, item.rule);
+			assert.equal(result.winningRule?.layer, "user");
+			assert.ok(result.commands?.length);
+			assert.equal(fake.selectCalls(), 0);
+			assert.equal(fake.entries(), entriesBefore);
+			const actual = await fake.getHandler()(
+				{
+					type: "tool_call",
+					toolName: "bash",
+					toolCallId: "actual",
+					input,
+				} as ToolCallEvent,
+				{ ...fake.ctx, hasUI: false } as ExtensionContext,
+			);
+			assert.equal(actual?.block ?? false, item.action !== "allow");
+		}
+	}
+});
+
+test("specific ask, parser error, and disabled guard remain distinct in dry-run", async () => {
+	const fake = harness(false, { bash: { "*": "allow", "git push": "ask" } });
+	const specific = await fake.getGuardCheck().execute(
+		"specific",
+		{
+			mode: "check",
+			tool: "bash",
+			input: { command: "git push origin main" },
+		},
+		undefined,
+		undefined,
+		fake.ctx,
+	);
+	assert.equal(
+		(specific.details as { disposition: string }).disposition,
+		"ask",
+	);
+	assert.equal(
+		(specific.details as { reviewEligible: boolean }).reviewEligible,
+		false,
+	);
+	assert.equal(
+		(specific.details as { winningRule: { pattern: string } }).winningRule
+			.pattern,
+		"git push",
+	);
+	const invalid = await fake.getGuardCheck().execute(
+		"invalid",
+		{
+			mode: "check",
+			tool: "bash",
+			input: { command: "echo 'unterminated" },
+		},
+		undefined,
+		undefined,
+		fake.ctx,
+	);
+	assert.ok((invalid.details as { parserError?: string }).parserError);
+	const disabled = harness(false, { bash: { "*": "ask" } }, false);
+	const bypass = await disabled.getGuardCheck().execute(
+		"bypass",
+		{
+			mode: "check",
+			tool: "bash",
+			input: { command: "curl example.com" },
+		},
+		undefined,
+		undefined,
+		disabled.ctx,
+	);
+	assert.equal(
+		(bypass.details as { patternAction: string }).patternAction,
+		"ask",
+	);
+	assert.equal(
+		(bypass.details as { disposition: string }).disposition,
+		"bypass",
+	);
+	assert.equal(fake.selectCalls(), 0);
+	assert.equal(disabled.selectCalls(), 0);
+});
 
 test("tool_call blocks a compound deny before opening UI", async () => {
 	const fake = harness();
@@ -398,6 +550,17 @@ test("an exact session approval is visible to guard_check through the live evalu
 		ctx,
 	);
 	assert.equal((changed.details as { disposition: string }).disposition, "ask");
+	const otherCwd = await guardCheck.execute(
+		"check-other-cwd",
+		{ mode: "check", tool: "bash", input: { command: "git push origin main" } },
+		undefined,
+		undefined,
+		{ ...ctx, cwd: "/other" } as ExtensionContext,
+	);
+	assert.equal(
+		(otherCwd.details as { disposition: string }).disposition,
+		"ask",
+	);
 	const rules = await guardCheck.execute(
 		"check-rules",
 		{ mode: "rules" },

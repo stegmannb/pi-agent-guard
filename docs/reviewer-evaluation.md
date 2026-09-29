@@ -15,7 +15,6 @@ Run `npm ci --ignore-scripts && npm run verify` from the repository root. The te
 | Session picker search, selection, main-follow, cancellation, persisted branch choice and unchanged main settings | `test/reviewer-model.test.ts`, including the Pi 0.86.1 native picker adapter |
 | Exact session grant, changed command or cwd, new policy deny | `test/auto-review.test.ts`, `test/extension.test.ts` |
 | Terminal countdown, pause on input, explicit resume, feedback, narrow dialog, RPC final-choice fallback and late response | `test/auto-review.test.ts` |
-| Required human decision, headless stop, same-session manual answer and invalid or duplicate IDs | `test/required-decision.test.ts` |
 
 The ten cases in `eval/reviewer-cases.ts` pair an operator policy and user task with the complete active rule set, cwd, command, expected pattern action, and expected reviewer class with a concrete reason. `test/evaluation-corpus.test.ts` passes them through registered Guard hooks and `guard_check`, supplies a fake provider response, and uses only a controlled executor stub. A denied or expired candidate has no execution side effect. It verifies routing, context and result handling; its expected judgments are **not** measured model accuracy.
 
@@ -41,4 +40,4 @@ Live results depend on the chosen model, credentials, policy and date. No live m
 
 ## Boundaries
 
-The reviewer sees only fallback-ask Bash calls. Commands already allowed by patterns do not pass through it, and a later sandbox may still reject a Guard allow. Global reviewer policy and settings must be protected by the host sandbox or deployment permissions; Guard runs in the same Pi process. Reviewer input contains visible conversation evidence but not hidden reasoning. A too-large mandatory policy or current multimodal instruction produces a conservative error rather than a fabricated allow. Saving a broad human rule deliberately changes future pattern behavior, whereas reviewer allow and `Allow once` do not. `guard_require_decision` resumes only after an explicit answer in the same saved session.
+The reviewer sees only fallback-ask Bash calls. Commands already allowed by patterns do not pass through it, and a later sandbox may still reject a Guard allow. Global reviewer policy and settings must be protected by the host sandbox or deployment permissions; Guard runs in the same Pi process. Reviewer input contains visible conversation evidence but not hidden reasoning. A too-large mandatory policy or current multimodal instruction produces a conservative error rather than a fabricated allow. Saving a broad human rule deliberately changes future pattern behavior, whereas reviewer allow and `Allow once` do not.

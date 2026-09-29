@@ -21,7 +21,7 @@
 	},
 	{
 		"path": "src/commands.ts",
-		"sha256": "aa9a9cca393ff551fa3a6da7db8b9fef70bb8861c731d36386e5643443edd4ca"
+		"sha256": "83465a23f490ddacf5a513fb669791935e76fc5d12a47c66f7e68d556598130f"
 	},
 	{
 		"path": "src/config.ts",
@@ -49,7 +49,7 @@
 	},
 	{
 		"path": "src/index.ts",
-		"sha256": "704ff0321c3e03f49c9b12945ad33c8552df7dd648cc702f32c37498f0b4cb35"
+		"sha256": "a14c6504261c39b22da98e79d6d2aefe205abc6e548f1119897c7a9a2e8bc172"
 	},
 	{
 		"path": "src/loaded-code.ts",
@@ -70,10 +70,6 @@
 	{
 		"path": "src/protection-snapshot.ts",
 		"sha256": "ba9f546738b1e17659362ab8b9fc5ce83503d8113785aac47feaf065a7fdab45"
-	},
-	{
-		"path": "src/required-decision.ts",
-		"sha256": "53dd1ad65a3f21b9462b1d9de460545364fda3471bd40df198ab33f5899c7674"
 	},
 	{
 		"path": "src/resolve.ts",

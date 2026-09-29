@@ -21,7 +21,6 @@ import {
 	ConfigurationCapture,
 	ProtectionSnapshot,
 } from "./protection-snapshot.ts";
-import { RequiredDecisionController } from "./required-decision.ts";
 import {
 	DEFAULT_REVIEWER_CONFIG,
 	type ReviewerConfig,
@@ -150,7 +149,6 @@ export function registerGuard(
 		reviewerConfig,
 		options.autoReview,
 	);
-	const requiredDecision = new RequiredDecisionController(pi);
 	const protection = new ProtectionSnapshot(
 		pi,
 		context,
@@ -158,16 +156,13 @@ export function registerGuard(
 		startupCwd,
 		configurationCapture,
 		bootstrap !== undefined || warnings.length > 0,
-		() =>
-			autoReview.hasProtectionRuntimeState() ||
-			requiredDecision.hasProtectionRuntimeState(),
+		() => autoReview.hasProtectionRuntimeState(),
 	);
 	let sessionGeneration = 0;
 	let sessionActive = true;
 
 	function resetSessionState(): void {
 		autoReview.sessionChanged();
-		requiredDecision.sessionChanged();
 		sessionGeneration++;
 		sessionActive = true;
 		context.activeProfile = undefined;
@@ -257,11 +252,6 @@ export function registerGuard(
 			ctx.ui.notify(result.message, result.ok ? "info" : "warning");
 			return;
 		}
-		if (action === "answer") {
-			const result = requiredDecision.answer(target, ctx);
-			ctx.ui.notify(result.message, result.ok ? "info" : "warning");
-			return;
-		}
 		const result = handleGuardCommand(action, target, context);
 		protection.observe();
 		const modelStatus = reviewerStatus(ctx);
@@ -299,12 +289,10 @@ export function registerGuard(
 	});
 
 	registerGuardCheck(pi, context);
-	requiredDecision.registerTool();
 	pi.on("session_start", async (_event, ctx) => {
 		protection.beginSession();
 		try {
 			resetSessionState();
-			requiredDecision.restore(ctx);
 			updateGuardStatus(ctx);
 			protection.started(ctx);
 		} catch (error) {
@@ -315,29 +303,24 @@ export function registerGuard(
 	pi.on("session_before_switch", async () => {
 		protection.unsupportedLifecycle();
 		autoReview.abortPending();
-		requiredDecision.abortDialog();
 	});
 	pi.on("session_before_fork", async () => {
 		protection.unsupportedLifecycle();
 		autoReview.abortPending();
-		requiredDecision.abortDialog();
 	});
 	pi.on("session_before_tree", async () => {
 		protection.unsupportedLifecycle();
 		autoReview.abortPending();
-		requiredDecision.abortDialog();
 		sessionGeneration++;
 	});
 	pi.on("session_switch", async (_event, ctx) => {
 		protection.unsupportedLifecycle();
 		resetSessionState();
-		requiredDecision.restore(ctx);
 		updateGuardStatus(ctx);
 	});
 	pi.on("session_fork", async (_event, ctx) => {
 		protection.unsupportedLifecycle();
 		resetSessionState();
-		requiredDecision.restore(ctx);
 		updateGuardStatus(ctx);
 	});
 	pi.on("session_shutdown", async () => {
@@ -348,7 +331,6 @@ export function registerGuard(
 	pi.on("session_tree", async (_event, ctx) => {
 		protection.unsupportedLifecycle();
 		autoReview.branchChanged();
-		requiredDecision.restore(ctx);
 		sessionGeneration++;
 		updateGuardStatus(ctx);
 	});
@@ -356,21 +338,10 @@ export function registerGuard(
 		protection.observe();
 		updateGuardStatus(ctx);
 	});
-	pi.on("input", async (event, ctx) => {
-		const blocked = requiredDecision.input(event.text, event.source, ctx);
-		if (blocked) return blocked;
+	pi.on("input", async () => {
 		autoReview.newUserInput();
 	});
-	pi.on("message_end", async (event) => {
-		if (event.message.role === "user")
-			requiredDecision.userMessage(event.message.content);
-	});
-	pi.on("message_start", async (event) => {
-		if (event.message.role === "assistant")
-			requiredDecision.assistantMessageStarted();
-	});
 	pi.on("tool_result", async (event) => {
-		requiredDecision.toolResult(event.toolName, event.toolCallId);
 		const result = autoReview.toolResult(event);
 		autoReview.newUserInput();
 		return result;
@@ -381,10 +352,12 @@ export function registerGuard(
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName !== "guard_check") protection.beginOperation();
 		try {
-			const decisionResult = requiredDecision.preflight(event, ctx);
-			if (decisionResult || event.toolName === "guard_require_decision")
-				return decisionResult;
 			if (event.toolName === "guard_check") return;
+			if (event.toolName === "guard_require_decision")
+				return {
+					block: true,
+					reason: "[Blocked by pi-guard: This tool has been removed]",
+				};
 			if (!sessionActive)
 				return {
 					block: true,

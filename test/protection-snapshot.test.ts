@@ -206,10 +206,7 @@ test("registered Guard binds repeatable live readiness and equivalent target wor
 	);
 	assert.ok(first.codeFiles.some((file) => file.path.endsWith("/index.ts")));
 	assert.equal(fake.prompts(), 0);
-	assert.deepEqual(
-		[...fake.tools.keys()],
-		["guard_check", "guard_require_decision"],
-	);
+	assert.deepEqual([...fake.tools.keys()], ["guard_check"]);
 	for (const ref of [...first.codeFiles, ...first.configurationFiles])
 		assert.equal(
 			ref.sha256,
@@ -548,7 +545,7 @@ test("real registration refuses code drift before/after load and missing deploym
 	}
 });
 
-test("restored required decision remains pending after unsupported snapshots", async () => {
+test("historical required decision entries cannot reactivate a pending choice", async () => {
 	const fake = harness();
 	fake.branch.push({
 		type: "custom",
@@ -568,13 +565,30 @@ test("restored required decision remains pending after unsupported snapshots", a
 		},
 	});
 	await fake.event("session_start");
-	unsupported(fake.snapshot(), "RUNTIME_MUTATION");
-	const blocked = (await fake.event("tool_call", {
+	ready(fake.snapshot());
+	await fake.command("answer decision one");
+	ready(fake.snapshot());
+	const removedTool = (await fake.event("tool_call", {
+		toolName: "guard_require_decision",
+		input: { question: "Which target?" },
+	})) as { block: boolean; reason: string };
+	assert.equal(removedTool.block, true);
+	assert.match(removedTool.reason, /removed/);
+	const allowed = await fake.event("tool_call", {
 		toolName: "bash",
 		input: { command: "echo yes" },
-	})) as { block: boolean; reason: string };
-	assert.equal(blocked.block, true);
-	assert.match(blocked.reason, /decision.*pending/);
+	});
+	assert.equal(allowed, undefined);
+	await fake.event("session_before_tree");
+	await fake.event("session_tree");
+	unsupported(fake.snapshot(), "RUNTIME_MUTATION");
+	await fake.event("session_switch");
+	const afterSwitch = await fake.event("tool_call", {
+		toolName: "bash",
+		input: { command: "echo yes" },
+	});
+	assert.equal(afterSwitch, undefined);
+	assert.equal(fake.tools.has("guard_require_decision"), false);
 	assert.equal(fake.branch.length, 1);
 });
 

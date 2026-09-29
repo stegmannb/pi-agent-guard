@@ -121,7 +121,7 @@ environment fingerprints.
 | `INITIALIZATION_FAILED` | Guard's `session_start` threw. |
 | `SESSION_MISMATCH` | The request or live context refers to another session. |
 | `DISABLED` | Guard is effectively disabled. Snapshotting never enables it. |
-| `RUNTIME_MUTATION` | Session/profile/enablement/reviewer override, pending or retained approval/decision state, active tool approval, or unsupported lifecycle transition. |
+| `RUNTIME_MUTATION` | Session/profile/enablement/reviewer override, pending or retained approval state, active tool approval, or unsupported lifecycle transition. |
 | `CONFIG_DRIFT` | Loaded code, consumed config, config presence, environment or parent resolver no longer matches the captured instance. |
 | `CWD_UNREPRODUCIBLE` | Target cwd is noncanonical or its actual resolution is not equivalent. |
 | `UNBACKED_CONFIGURATION` | Custom bootstrap, unknown code closure, invalid configuration, credential-bearing settings, custom model config, unreproducible reviewer model or unexpected inspection failure. |

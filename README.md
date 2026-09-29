@@ -14,7 +14,6 @@ pi-guard intercepts tool calls and prompts for approval before executing potenti
 - **Policy inspection** — The `guard_check` tool explains the active policy or dry-runs a proposed tool call without side effects
 - **Non-interactive support** — Denied commands are silently blocked in CI/CD; use `PI_GUARD` env var for automation
 - **Session rules** — "Always allow for this session" without modifying config files
-- **Required human decisions** — An agent can stop for a specific choice without requesting permission for an action
 
 ## Examples
 
@@ -134,22 +133,6 @@ https://api.github.com/repos/jdiamond/pi-guard/issues
 In non-interactive mode (e.g., CI), an `ask` call is blocked without a prompt.
 The tool result includes the policy reason so the agent can try another command
 or report the blocker.
-
-### Required human decisions
-
-The agent can call `guard_require_decision` when it needs a human choice before continuing. The call must contain a question, a reason why the answer is needed, and at least two options with distinct keys and labels. It should be the only tool call in that assistant message. This is a decision request, not a command approval: selecting an answer never executes a command or changes guard rules.
-
-In the terminal or an RPC client that implements Pi's extension UI, the standard selection dialog shows the question, reason, keyed options, and **Cancel**. It waits without the normal approval timeout. Cancel or abort discards the request without assuming an answer. While the dialog is open, pi-guard blocks subsequent tool calls, including commands already allowed by a pattern. Tool calls that started before the decision request cannot be undone.
-
-In print or other headless mode, pi-guard records the pending question and request ID in the session, writes the question and options to stderr (also visible as a tool event in JSON mode), and stops the agent turn. Resume the **same saved Pi session** with `pi --session <session-file>` or `pi -c` for the most recent session, then answer from the terminal or RPC command interface:
-
-```text
-/guard answer <request-id> <option-key> [additional context]
-```
-
-For example, `/guard answer 123e4567-e89b-12d3-a456-426614174000 staging use the test account` chooses the `staging` option and gives the agent extra context. The command only accepts the active request ID and an offered option. Old IDs, requests from another session or branch, and duplicate answers are rejected. The answer becomes a user message and starts a new turn; the agent must still pass normal guard checks for every later action. If Pi cannot deliver the answer because no authenticated model is available, the request remains pending; select a working model and retry the command.
-
-Run Pi with session persistence when a headless decision must survive process exit. With `--no-session`, the request exists only in the running process and cannot be durably resumed after exit. Pi-guard does not poll for answers or start another turn on its own.
 
 A `deny` result is final for the complete tool call. If any command in a pipeline, subshell, wrapper, or compound expression is denied, pi-guard blocks the tool call before opening an approval prompt.
 
@@ -456,7 +439,7 @@ Use `mode: "check"` to evaluate a proposed tool call:
 }
 ```
 
-The result includes the extracted input, whether the guard is enabled, the effective action, the enforcement disposition, review eligibility, the winning rule and its source layer, a policy version, and per-command results for Bash. Parser and input errors are returned explicitly. A disposition of `bypass` means the guard is disabled; it is distinct from an `allow` policy decision.
+Pass the complete Bash command, including pipes, redirections, and command substitutions, in `input.command`. The result includes the input and cwd, whether the guard is enabled, the effective action, the enforcement disposition, review eligibility, the winning rule and its source layer, a policy version, and per-command results for Bash. `allow` means the current Guard policy allows the call; `ask` means execution still needs review or approval; `deny` blocks it. `reviewEligible` identifies a fallback ask that can reach the auto-reviewer during execution, but the dry-run does not invoke or predict that reviewer. Parser and input errors are returned explicitly. A disposition of `bypass` means the guard is disabled; it is distinct from a policy `allow`.
 
 Use `mode: "rules"` to inspect the merged policy:
 
@@ -470,7 +453,9 @@ Use `mode: "rules"` to inspect the merged policy:
 
 The optional filters reduce the displayed rules only; they do not change the policy version or recompute decisions. The response contains every policy layer, rule origin, overridden rules, effective rules, matcher semantics, and the active profile. `/guard list` presents the same runtime snapshot in a human-readable form.
 
-`guard_check` never executes a command, opens approval UI, or modifies session or persistent rules. Its result covers pi-guard only; another sandbox or extension can still reject an allowed call.
+`guard_check` works without an answer channel in terminal, RPC, and headless sessions. It never executes a command, calls the LLM reviewer, opens approval UI, or modifies session or persistent rules. The result applies only to that input, cwd, and policy version. An actual tool call evaluates the then-current policy again, and another sandbox or extension can still reject it. Use the dry-run when rule coverage is unclear; it is not a mandatory step before every command.
+
+The former `guard_require_decision` tool and `/guard answer` command have been removed. Old `pi-guard-required-decision` session entries remain historical data and do not resume a dialog or authorize an action. Ask substantive questions in the agent conversation. Actual `ask` tool calls still use Guard approval and `/guard approve`.
 
 User, project, and `PI_GUARD` sources are captured when the extension starts. Profile selection, session rules, and the session-only enabled override are applied dynamically and produce a new policy version.
 
