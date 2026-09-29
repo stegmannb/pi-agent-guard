@@ -183,9 +183,8 @@ export function registerGuard(
 	function updateGuardStatus(ctx: ExtensionContext): void {
 		if (!ctx.hasUI) return;
 		const snapshot = buildPolicySnapshot(context);
-		const modelStatus = reviewerStatus(ctx);
 		if (!snapshot.guardEnabled) {
-			ctx.ui.setStatus("guard", `⚠️ Guard: off · ${modelStatus}`);
+			ctx.ui.setStatus("guard", "⚠️ Guard: off");
 			return;
 		}
 		const bashRules =
@@ -200,10 +199,7 @@ export function registerGuard(
 					: 0;
 		ctx.ui.setStatus(
 			"guard",
-			ctx.ui.theme.fg(
-				"accent",
-				`🛡️ Guard: ${count} bash rules · ${modelStatus}`,
-			),
+			ctx.ui.theme.fg("accent", `🛡️ Guard: ${count} bash rules`),
 		);
 	}
 

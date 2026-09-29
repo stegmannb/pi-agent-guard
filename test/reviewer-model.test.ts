@@ -412,10 +412,16 @@ test("guard command persists only valid choices, reports status, and refreshes a
 	assert.match(h.notices.at(-1) ?? "", /Reviewer: off/);
 	h.setEntries([]);
 	await h.events.get("session_switch")?.({ type: "session_switch" }, h.ctx);
-	assert.match(h.statuses.at(-1) ?? "", /global/);
+	assert.equal(
+		h.statuses.at(-1),
+		`🛡️ Guard: ${Object.keys(DEFAULT_CONFIG.rules.bash).length} bash rules`,
+	);
 	h.setMain(alpha);
 	await h.events.get("model_select")?.({ type: "model_select" }, h.ctx);
-	assert.match(h.statuses.at(-1) ?? "", /Reviewer model/);
+	assert.equal(
+		h.statuses.at(-1),
+		`🛡️ Guard: ${Object.keys(DEFAULT_CONFIG.rules.bash).length} bash rules`,
+	);
 });
 
 test("an in-flight review keeps its model when the next call selects another", async () => {

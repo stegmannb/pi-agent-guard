@@ -275,8 +275,9 @@ same model selector and keyboard navigation as the main picker. The picker
 shows the current reviewer source and model. Press **Alt+M** to follow the
 current main model again, or use `/guard model main`. To select directly, use
 `/guard model <provider>/<model-id>`; the model ID may itself contain `/`.
-`/guard model status` reports the source and resolved model. The Guard status
-line and `/guard list` show the same information.
+The status line shows only `🛡️ Guard: <N> bash rules` when Guard is active or
+`⚠️ Guard: off` when it is inactive. `/guard model status` and `/guard list`
+report the reviewer mode, model source, and resolved model instead.
 
 A session choice takes precedence over the global `guard.reviewer.model`,
 which defaults to `openai/gpt-6-luna`; `main` follows subsequent changes of the

@@ -49,7 +49,7 @@
 	},
 	{
 		"path": "src/index.ts",
-		"sha256": "1f06ae0c648d5aba29bdf99277b9bfd6d7dccf5dbb2ce4756b296ac7f4fb3cf0"
+		"sha256": "704ff0321c3e03f49c9b12945ad33c8552df7dd648cc702f32c37498f0b4cb35"
 	},
 	{
 		"path": "src/loaded-code.ts",

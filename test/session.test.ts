@@ -7,6 +7,7 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
+import { DEFAULT_CONFIG } from "../src/defaults.ts";
 
 type Event = {
 	type: string;
@@ -49,6 +50,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 			registerTool: () => undefined,
 			registerCommand: (name: string, command: { handler: CommandHandler }) =>
 				commands.set(name, command.handler),
+			appendEntry: () => undefined,
 			events: { emit: () => undefined },
 		} as unknown as ExtensionAPI;
 		let approvalCount = 0;
@@ -56,6 +58,8 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		let pendingSelection: ((choice: string) => void) | undefined;
 		let deferApproval = false;
 		const statuses: string[] = [];
+		const notices: string[] = [];
+		const activeStatus = `🛡️ Guard: ${Object.keys(DEFAULT_CONFIG.rules.bash).length + 2} bash rules`;
 		const ctx = {
 			cwd: projectDir,
 			hasUI: true,
@@ -70,7 +74,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 					}
 					return choices[1];
 				},
-				notify: () => undefined,
+				notify: (message: string) => notices.push(message),
 				setStatus: (_key: string, value: string) => statuses.push(value),
 				theme: { fg: (_color: string, value: string) => value },
 			},
@@ -81,6 +85,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		const sessionStart = handlers.get("session_start");
 		const sessionSwitch = handlers.get("session_switch");
 		const sessionFork = handlers.get("session_fork");
+		const modelSelect = handlers.get("model_select");
 		const sessionShutdown = handlers.get("session_shutdown");
 		const guardCommand = commands.get("guard");
 		const toggleCommand = commands.get("guard-toggle");
@@ -88,6 +93,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		assert.ok(sessionStart);
 		assert.ok(sessionSwitch);
 		assert.ok(sessionFork);
+		assert.ok(modelSelect);
 		assert.ok(sessionShutdown);
 		assert.ok(guardCommand);
 		assert.ok(toggleCommand);
@@ -100,6 +106,15 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		const rootScan = 'find / -maxdepth 4 -iname "config" -path "*Projects*"';
 
 		await sessionStart({ type: "session_start" }, ctx);
+		assert.equal(statuses.at(-1), activeStatus);
+		await guardCommand("model main", ctx);
+		assert.match(notices.at(-1) ?? "", /Reviewer model selected/);
+		assert.equal(statuses.at(-1), activeStatus);
+		await guardCommand("model status", ctx);
+		assert.match(notices.at(-1) ?? "", /Reviewer model:/);
+		assert.equal(statuses.at(-1), activeStatus);
+		await modelSelect({ type: "model_select" }, ctx);
+		assert.equal(statuses.at(-1), activeStatus);
 		await bash("git commit -m test");
 		assert.equal(approvalCount, 1);
 		assert.deepEqual(await bash(rootScan), {
@@ -110,6 +125,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 
 		sessionId = "session-b";
 		await sessionStart({ type: "session_start", reason: "new" }, ctx);
+		assert.equal(statuses.at(-1), activeStatus);
 		assert.deepEqual(await bash("git push"), {
 			block: true,
 			reason: "[Blocked by pi-guard: Security policy]",
@@ -125,12 +141,12 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		assert.equal(await bash("git push"), undefined);
 		sessionId = "session-c";
 		await sessionSwitch({ type: "session_switch", reason: "new" }, ctx);
+		assert.equal(statuses.at(-1), activeStatus);
 		assert.deepEqual(await bash("git push"), {
 			block: true,
 			reason: "[Blocked by pi-guard: Security policy]",
 		});
 		assert.equal(approvalCount, 2);
-		assert.ok(statuses.at(-1)?.includes("Guard:"));
 
 		assert.deepEqual(await bash("git commit -m test && git push"), {
 			block: true,
@@ -139,9 +155,11 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		assert.equal(approvalCount, 2);
 
 		await toggleCommand("", ctx);
+		assert.equal(statuses.at(-1), "⚠️ Guard: off");
 		assert.equal(await bash("git push"), undefined);
 		sessionId = "session-d";
 		await sessionSwitch({ type: "session_switch", reason: "resume" }, ctx);
+		assert.equal(statuses.at(-1), activeStatus);
 		assert.deepEqual(await bash("git push"), {
 			block: true,
 			reason: "[Blocked by pi-guard: Security policy]",
@@ -151,6 +169,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		assert.equal(await bash("git push"), undefined);
 		sessionId = "session-e";
 		await sessionFork({ type: "session_fork" }, ctx);
+		assert.equal(statuses.at(-1), activeStatus);
 		assert.deepEqual(await bash("git push"), {
 			block: true,
 			reason: "[Blocked by pi-guard: Security policy]",
@@ -162,6 +181,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		assert.ok(pendingSelection);
 		await guardCommand("profile relaxed", ctx);
 		await toggleCommand("", ctx);
+		assert.equal(statuses.at(-1), "⚠️ Guard: off");
 		await sessionShutdown({ type: "session_shutdown" }, ctx);
 		sessionId = "session-f";
 		pendingSelection("Allow globally  \u2192  settings.json");
@@ -180,6 +200,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 
 		deferApproval = false;
 		await sessionStart({ type: "session_start", reason: "reload" }, ctx);
+		assert.equal(statuses.at(-1), activeStatus);
 		assert.deepEqual(await bash(rootScan), {
 			block: true,
 			reason: "[Blocked by pi-guard: Security policy]",
@@ -192,6 +213,7 @@ test("guard resets session state and blocks denied bash commands", async () => {
 		assert.equal(await bash("git push"), undefined);
 		sessionId = "session-g";
 		await sessionStart({ type: "session_start", reason: "resume" }, ctx);
+		assert.equal(statuses.at(-1), activeStatus);
 		assert.deepEqual(await bash("git push"), {
 			block: true,
 			reason: "[Blocked by pi-guard: Security policy]",
