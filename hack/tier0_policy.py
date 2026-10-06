@@ -369,6 +369,7 @@ def validate_gate_scripts(root: Path) -> None:
         name: base + f"{DEPENDENCY_INSTALL}\n{NPM_SCRIPT_SHELL}\n{command}\n"
         for name, command in EXPECTED_GATE_COMMANDS.items()
     }
+    expected["test"] += "git diff --exit-code\n"
     expected["policy"] = (
         base
         + "event_args=()\n"
@@ -519,8 +520,13 @@ def validate_event(root: Path, event_path: Path) -> None:
     head = pull_request.get("head")
     if not isinstance(base, dict) or not isinstance(head, dict):
         raise PolicyError("pull_request event must contain base and head")
-    if base.get("ref") != "main":
-        raise PolicyError("Tier-0 pull requests must target main")
+    base_ref = base.get("ref")
+    if base_ref != "main" and not (
+        isinstance(base_ref, str)
+        and base_ref.startswith("release/")
+        and len(base_ref) > len("release/")
+    ):
+        raise PolicyError("Tier-0 pull requests must target main or release/*")
     head_sha = head.get("sha")
     if not isinstance(head_sha, str) or not FULL_SHA.fullmatch(head_sha):
         raise PolicyError("pull_request head must be a full commit SHA")
