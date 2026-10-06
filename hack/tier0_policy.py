@@ -369,7 +369,9 @@ def validate_gate_scripts(root: Path) -> None:
         name: base + f"{DEPENDENCY_INSTALL}\n{NPM_SCRIPT_SHELL}\n{command}\n"
         for name, command in EXPECTED_GATE_COMMANDS.items()
     }
-    expected["test"] += "git diff --exit-code\n"
+    expected["test"] += (
+        'git diff --exit-code HEAD\ntest -z "$(git ls-files --others --exclude-standard)"\n'
+    )
     expected["policy"] = (
         base
         + "event_args=()\n"

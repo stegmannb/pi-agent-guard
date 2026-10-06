@@ -8,4 +8,5 @@ pnpm install --frozen-lockfile --ignore-scripts
 npm_config_script_shell="$(command -v bash)"
 export npm_config_script_shell
 npm run --ignore-scripts verify
-git diff --exit-code
+git diff --exit-code HEAD
+test -z "$(git ls-files --others --exclude-standard)"
