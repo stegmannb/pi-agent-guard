@@ -37,3 +37,8 @@ in addition to the five CI checks. All Git tags must be protected with an empty
 allowlist, and Forgejo Releases and Packages must be disabled. Record the audit
 in `.forgejo/tier0.yaml`. Repeat the administrative readback
 after Forgejo upgrades, protection changes, and by 2026-09-30.
+
+Merge permission follows the protected branch's merger allowlist. An allowlisted
+agent may merge its own PR only after current independent reviewer approval and
+all required checks pass. It cannot approve its own PR or bypass protection.
+Separate task-specific apply gates still apply.
