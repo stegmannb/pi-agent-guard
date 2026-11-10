@@ -6,8 +6,11 @@ fast-forward updates with exact destination leases.
 
 Incoming GitHub changes create or update a Forgejo import pull request. The
 synchronizer writes only its import branches. Acceptance requires the same
-exact-head CI, independent Reviewers approval, and Owner merge as any other
-Tier-0 contribution. Use fast-forward-only merging for imports to preserve
+exact-head CI, independent Reviewers approval, and an authorized protected-branch
+merge as any other Tier-0 contribution. An allowlisted agent may merge its own
+PR after official approval from a different identity, without self-approval,
+direct pushes or administrator bypass. Separate task-specific apply gates remain
+in force. Use fast-forward-only merging for imports to preserve
 commit identities. The synchronizer never merges a pull request.
 
 Pending GitHub changes remain intact while review is open. Divergent histories
